@@ -27,56 +27,55 @@ Polls Tesla's inventory API across all Australian states for Model Y and Model 3
 
 ## Installation
 
-### 1. Clone and install dependencies
+### 1. Clone the repo
 
 ```bash
 git clone https://github.com/davisshannon/tesla-watch.git
 cd tesla-watch
-npm install
 ```
 
-### 2. Create your config file
-
-Copy the example config and edit it:
+### 2. Run setup
 
 ```bash
-cp tesla-watch.config.example.json tesla-watch.config.json
+./tesla-watch.sh setup
 ```
 
-Minimum required config — just set your iMessage destination:
+This will:
+- Detect your Node.js path
+- Install npm dependencies
+- Create `tesla-watch.config.json` from the example
+- Install and load both launchd jobs (checker + web server)
 
-```json
-{
-  "notify": {
-    "imessage": {
-      "enabled": true,
-      "to": "you@icloud.com"
-    }
-  }
-}
-```
+### 3. Set your iMessage destination
 
-All other fields have sensible defaults. See [Configuration](#configuration) below for all options.
-
-### 3. Install the launchd jobs
-
-**Checker** (runs inventory check every 5 minutes):
-```bash
-cp tesla-watch.plist ~/Library/LaunchAgents/com.tesla-watch.checker.plist
-launchctl load ~/Library/LaunchAgents/com.tesla-watch.checker.plist
-```
-
-**Web server** (dashboard, runs permanently):
-```bash
-cp tesla-watch-server.plist ~/Library/LaunchAgents/com.tesla-watch.server.plist
-launchctl load ~/Library/LaunchAgents/com.tesla-watch.server.plist
-```
+Either edit `tesla-watch.config.json` and set `notify.imessage.to` to your phone number or iCloud email — or just open the dashboard and configure everything in **Settings**.
 
 ### 4. Open the dashboard
 
 ```
 http://localhost:3737
 ```
+
+---
+
+## Management script
+
+`tesla-watch.sh` handles everything from a single entry point:
+
+```bash
+./tesla-watch.sh setup      # First-time install — deps, config, launchd jobs
+./tesla-watch.sh start      # Load launchd jobs
+./tesla-watch.sh stop       # Unload launchd jobs
+./tesla-watch.sh restart    # Stop then start
+./tesla-watch.sh status     # Show running state of all components
+./tesla-watch.sh logs       # Show recent checker + server logs
+./tesla-watch.sh logs check # Follow checker log live
+./tesla-watch.sh logs server # Follow server log live
+./tesla-watch.sh run        # Run one inventory check right now
+./tesla-watch.sh uninstall  # Remove launchd plists
+```
+
+`setup` is idempotent — safe to re-run if you move the repo or need to re-register the launchd jobs.
 
 ---
 
