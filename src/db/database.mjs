@@ -251,7 +251,9 @@ export function queryEvents(db, { watchId, type, limit = 100, offset = 0 } = {})
   if (type)            { where += " AND e.event_type = ?"; params.push(type); }
   return db.prepare(`
     SELECT e.*, w.label as watch_label, w.model as watch_model,
-           v.location, v.trim as vehicle_trim
+           v.location, v.city, v.trim as vehicle_trim, v.year,
+           v.exterior, v.interior, v.wheels, v.odometer,
+           v.subtotal, v.vin
     FROM events e
     JOIN watches w ON w.id = e.watch_id
     LEFT JOIN vehicles v ON v.id = e.vehicle_id AND v.watch_id = e.watch_id

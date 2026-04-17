@@ -824,12 +824,22 @@ async function loadEvents() {
   document.getElementById("eventsList").innerHTML = events.length ? events.map(e => {
     const priceStr = e.event_type === "price_drop" && e.prior_price
       ? `${fmtPrice(e.price)} (was ${fmtPrice(e.prior_price)})` : fmtPrice(e.price);
-    const meta = [e.location, modelLabel(e.watch_model), e.vehicle_trim].filter(Boolean).join(" · ");
+    const location = [e.city, e.location].filter(Boolean).join(", ");
+    const specs = [
+      e.year, modelLabel(e.watch_model), e.vehicle_trim,
+      e.exterior, e.interior, e.wheels,
+      e.odometer ? e.odometer + " km" : null,
+    ].filter(Boolean).join(" · ");
+    const prices = [
+      priceStr,
+      e.subtotal ? `subtotal ${fmtPrice(e.subtotal)} ${fbtBadge(e.subtotal)}` : null,
+    ].filter(Boolean).join(" · ");
     return `<div class="event-item">
       <div class="event-icon">${icons[e.event_type] || "⚪"}</div>
       <div class="event-detail">
-        <div class="ev-title">${labels[e.event_type] || e.event_type} · ${meta}</div>
-        <div class="ev-meta">${priceStr} · ${fmt(e.occurred_at)}${e.notified ? " · <span style='color:var(--green)'>notified</span>" : ""}</div>
+        <div class="ev-title">${labels[e.event_type] || e.event_type}${location ? " · " + location : ""}${e.notified ? " · <span style='color:var(--green);font-size:0.75rem'>notified</span>" : ""}</div>
+        <div style="font-size:0.82rem;margin:3px 0;color:var(--text)">${specs || "—"}</div>
+        <div class="ev-meta">${prices} · ${fmt(e.occurred_at)}${e.vin ? " · <span style='color:var(--muted);font-size:0.72rem'>" + e.vin + "</span>" : ""}</div>
       </div>
     </div>`;
   }).join("") : `<div class="no-data">No events found</div>`;
