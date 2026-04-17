@@ -4,3 +4,4 @@ tesla-watch.config.json
 *.log
 tesla-state.json
 tesla-monitor.log
+new-check.mjs

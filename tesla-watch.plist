@@ -30,7 +30,6 @@
     <key>StandardErrorPath</key>
     <string>__INSTALL_DIR__/data/launchd.log</string>
 
-    <!-- Restart automatically if it crashes -->
     <key>KeepAlive</key>
     <false/>
 

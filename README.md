@@ -22,6 +22,7 @@ Polls Tesla's inventory API across all Australian states for Model Y and Model 3
 - macOS (iMessage via AppleScript, launchd scheduler)
 - Node.js 18+ (`__NODE__`)
 - Google Chrome installed at `/Applications/Google Chrome.app`
+- **iMessage notifications require your Apple ID to be signed in to Messages.app** on the Mac running this tool
 
 ---
 
@@ -49,6 +50,8 @@ This will:
 ### 3. Set your iMessage destination
 
 Either edit `tesla-watch.config.json` and set `notify.imessage.to` to your phone number or iCloud email — or just open the dashboard and configure everything in **Settings**.
+
+> **Note:** iMessage notifications require your Apple ID to be signed in to **Messages.app** on this Mac. The checker runs as a background launchd job, so Messages must be open or at least signed in for AppleScript to send messages.
 
 ### 4. Open the dashboard
 

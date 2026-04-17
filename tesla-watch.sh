@@ -23,7 +23,7 @@ node_path() {
   local n
   n=$(command -v node 2>/dev/null || true)
   if [[ -z "$n" ]]; then
-    for p in __NODE__ /usr/local/bin/node; do
+    for p in /opt/homebrew/bin/node /usr/local/bin/node; do
       [[ -x "$p" ]] && echo "$p" && return
     done
     error "Node.js not found. Install it from https://nodejs.org or via Homebrew: brew install node"
