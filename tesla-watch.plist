@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tesla-watch.checker</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__NODE__</string>
+        <string>__INSTALL_DIR__/src/cli.mjs</string>
+        <string>run</string>
+        <string>--config</string>
+        <string>__INSTALL_DIR__/tesla-watch.config.json</string>
+    </array>
+
+    <!-- Run every 5 minutes -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <!-- Wake the Mac from idle sleep to run -->
+    <key>WakeForJob</key>
+    <true/>
+
+    <key>WorkingDirectory</key>
+    <string>__INSTALL_DIR__</string>
+
+    <key>StandardOutPath</key>
+    <string>__INSTALL_DIR__/data/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>__INSTALL_DIR__/data/launchd.log</string>
+
+    <!-- Restart automatically if it crashes -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>

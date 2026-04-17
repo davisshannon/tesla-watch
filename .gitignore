@@ -1,0 +1,6 @@
+node_modules/
+data/
+tesla-watch.config.json
+*.log
+tesla-state.json
+tesla-monitor.log

@@ -1,0 +1,24 @@
+{
+  "name": "tesla-watch",
+  "version": "1.0.0",
+  "description": "Tesla inventory monitor with iMessage notifications",
+  "type": "module",
+  "bin": {
+    "tesla-watch": "./src/cli.mjs"
+  },
+  "scripts": {
+    "run": "node src/cli.mjs run",
+    "watch": "node src/cli.mjs watch",
+    "test-imessage": "node src/cli.mjs test-imessage",
+    "test-browser": "node src/cli.mjs test-browser",
+    "show-state": "node src/cli.mjs show-state",
+    "reset-state": "node src/cli.mjs reset-state",
+    "serve": "node src/cli.mjs serve"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.9.0",
+    "express": "^5.2.1",
+    "playwright": "^1.59.1",
+    "puppeteer-core": "^24.41.0"
+  }
+}

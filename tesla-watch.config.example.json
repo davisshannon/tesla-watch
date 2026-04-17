@@ -1,0 +1,25 @@
+{
+  "chromeDebugUrl": "http://localhost:9222",
+  "dbFile": "./data/tesla-watch.db",
+  "logFile": "./data/tesla-watch.log",
+  "waitMs": 8000,
+  "fbtThreshold": 91387,
+  "sort": "plh",
+  "server": {
+    "port": 3737
+  },
+  "notify": {
+    "imessage": {
+      "enabled": true,
+      "to": "you@icloud.com"
+    },
+    "triggers": ["new_stock", "price_drop"],
+    "filters": {
+      "maxPrice": null,
+      "states": null,
+      "models": null,
+      "variants": null,
+      "fbtOnly": false
+    }
+  }
+}

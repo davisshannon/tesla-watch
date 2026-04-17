@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.tesla-watch.server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__NODE__</string>
+        <string>__INSTALL_DIR__/src/cli.mjs</string>
+        <string>serve</string>
+        <string>--config</string>
+        <string>__INSTALL_DIR__/tesla-watch.config.json</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__INSTALL_DIR__</string>
+
+    <key>StandardOutPath</key>
+    <string>__INSTALL_DIR__/data/server.log</string>
+    <key>StandardErrorPath</key>
+    <string>__INSTALL_DIR__/data/server.log</string>
+
+    <!-- Keep the server alive — restart if it crashes -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>

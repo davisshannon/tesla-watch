@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.wdavis2.tesla-watch</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>/Users/wdavis2/claude-code/tesla-check/src/cli.mjs</string>
+        <string>run</string>
+        <string>--config</string>
+        <string>/Users/wdavis2/claude-code/tesla-check/tesla-watch.config.json</string>
+    </array>
+
+    <!-- Run every 5 minutes -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <!-- Wake the Mac from idle sleep to run -->
+    <key>WakeForJob</key>
+    <true/>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/wdavis2/claude-code/tesla-check</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/wdavis2/claude-code/tesla-check/data/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/wdavis2/claude-code/tesla-check/data/launchd.log</string>
+
+    <!-- Restart automatically if it crashes -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>

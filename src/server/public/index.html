@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tesla Watch</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="64x64" href="/favicon-64.png">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d0d0d; --surface: #181818; --surface2: #222; --border: #2a2a2a;
+    --text: #e8e8e8; --muted: #888; --tesla: #e82127; --green: #2db85e;
+    --blue: #3b82f6; --yellow: #f59e0b; --red: #cc3333;
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 1.2rem; font-weight: 600; }
+  header .subtitle { color: var(--muted); font-size: 0.85rem; }
+  .last-updated { margin-left: auto; color: var(--muted); font-size: 0.8rem; }
+  nav { background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; }
+  nav button { background: none; border: none; color: var(--muted); padding: 12px 16px; cursor: pointer; font-size: 0.9rem; border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; }
+  nav button.active { color: var(--text); border-bottom-color: var(--tesla); }
+  nav button:hover { color: var(--text); }
+  main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+  .tab-pane { display: none; }
+  .tab-pane.active { display: block; }
+
+  /* Status cards */
+  .status-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-bottom: 28px; }
+  .status-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .status-card .watch-name { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+  .status-card .count { font-size: 2rem; font-weight: 700; margin-bottom: 4px; }
+  .status-card .count.has-stock { color: var(--green); }
+  .status-card .count.no-stock { color: var(--muted); }
+  .status-card .meta { font-size: 0.78rem; color: var(--muted); }
+  .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
+  .dot-ok { background: var(--green); } .dot-error { background: var(--red); } .dot-unknown { background: var(--muted); }
+
+  /* Chart */
+  .chart-section { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 28px; }
+  .chart-section h2 { font-size: 0.9rem; color: var(--muted); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .chart-controls { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .chip { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer; color: var(--muted); }
+  .chip.active { background: var(--tesla); border-color: var(--tesla); color: #fff; }
+  canvas { max-height: 260px; }
+
+  /* Tables */
+  .table-controls { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+  .table-controls input, .table-controls select { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 12px; font-size: 0.85rem; }
+  .table-controls input::placeholder { color: var(--muted); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 600; }
+  .badge-green { background: #1a3d2a; color: var(--green); }
+  .badge-red { background: #3d1a1a; color: #f87171; }
+  .badge-yellow { background: #3d2f0a; color: var(--yellow); }
+  .badge-blue { background: #1a2a3d; color: var(--blue); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+  th { color: var(--muted); font-weight: 500; text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { background: var(--surface2); }
+  .fbt-ok { color: var(--green); font-size: 0.75rem; }
+  .fbt-over { color: var(--yellow); font-size: 0.75rem; }
+  .no-data { text-align: center; color: var(--muted); padding: 40px; }
+  .pagination { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+  .pagination button { background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 14px; cursor: pointer; font-size: 0.82rem; }
+  .pagination button:disabled { opacity: 0.3; cursor: default; }
+
+  /* Map */
+  .au-state { fill: var(--surface2); stroke: #444; stroke-width: 1.5; cursor: pointer; transition: fill 0.15s; }
+  .au-state:hover { stroke: #aaa; stroke-width: 2; }
+  .au-state-label { fill: #999; font-size: 10px; font-family: -apple-system, sans-serif; pointer-events: none; text-anchor: middle; }
+  .map-bubble { opacity: 0.85; cursor: pointer; transition: opacity 0.15s; }
+  .map-bubble:hover { opacity: 1; }
+
+  /* Events */
+  .events-list { display: flex; flex-direction: column; gap: 8px; }
+  .event-item { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; display: flex; align-items: flex-start; gap: 12px; }
+  .event-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+  .event-detail .ev-title { font-weight: 500; margin-bottom: 2px; font-size: 0.85rem; }
+  .event-detail .ev-meta { color: var(--muted); font-size: 0.76rem; }
+
+  /* Settings */
+  .settings-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 900px) { .settings-grid { grid-template-columns: 1fr; } }
+  .settings-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 22px; }
+  .settings-card h3 { font-size: 0.85rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 18px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 6px; }
+  .field input[type=text], .field input[type=number], .field input[type=email] {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 8px 12px; font-size: 0.9rem;
+  }
+  .field input:focus { outline: none; border-color: var(--tesla); }
+  .field .hint { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+  .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; }
+  .toggle-row span { font-size: 0.88rem; }
+  .toggle { position: relative; display: inline-block; width: 40px; height: 22px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .slider { position: absolute; cursor: pointer; inset: 0; background: var(--surface2); border-radius: 22px; transition: 0.2s; border: 1px solid var(--border); }
+  .slider:before { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; bottom: 2px; background: var(--muted); border-radius: 50%; transition: 0.2s; }
+  .toggle input:checked + .slider { background: var(--tesla); border-color: var(--tesla); }
+  .toggle input:checked + .slider:before { transform: translateX(18px); background: #fff; }
+  .tag-input-wrap { display: flex; flex-wrap: wrap; gap: 6px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; min-height: 40px; cursor: text; }
+  .tag-input-wrap:focus-within { border-color: var(--tesla); }
+  .tag { background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 2px 8px; font-size: 0.8rem; display: flex; align-items: center; gap: 6px; }
+  .tag button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 0.9rem; padding: 0; line-height: 1; }
+  .tag button:hover { color: #f87171; }
+  .tag-input { background: none; border: none; outline: none; color: var(--text); font-size: 0.85rem; min-width: 80px; flex: 1; }
+  .btn { padding: 8px 18px; border-radius: 6px; border: none; cursor: pointer; font-size: 0.88rem; font-weight: 500; }
+  .btn-primary { background: var(--tesla); color: #fff; }
+  .btn-primary:hover { background: #c41d22; }
+  .btn-primary:disabled { opacity: 0.5; cursor: default; }
+  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--muted); }
+  .save-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+  .save-msg { font-size: 0.82rem; }
+  .save-msg.ok { color: var(--green); }
+  .save-msg.err { color: #f87171; }
+  .scheduler-status { display: flex; flex-direction: column; gap: 12px; }
+  .sched-row { display: flex; align-items: center; justify-content: space-between; background: var(--surface2); border-radius: 8px; padding: 12px 16px; }
+  .sched-row .sched-info { font-size: 0.85rem; }
+  .sched-row .sched-label { font-weight: 500; margin-bottom: 3px; }
+  .sched-row .sched-meta { font-size: 0.76rem; color: var(--muted); }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; }
+  .pill-green { background: #1a3d2a; color: var(--green); }
+  .pill-red { background: #3d1a1a; color: #f87171; }
+  .pill-muted { background: var(--border); color: var(--muted); }
+  .checkbox-group { display: flex; flex-direction: column; gap: 8px; }
+  .checkbox-row { display: flex; align-items: center; gap: 10px; font-size: 0.88rem; cursor: pointer; }
+  .checkbox-row input[type=checkbox] { accent-color: var(--tesla); width: 15px; height: 15px; cursor: pointer; }
+</style>
+</head>
+<body>
+
+<header>
+  <img src="/logo-40.png" alt="Tesla" style="width:40px;height:40px;object-fit:contain">
+  <div>
+    <h1>Tesla Watch</h1>
+    <div class="subtitle">AU Inventory Monitor</div>
+  </div>
+  <div class="last-updated" id="lastUpdated">—</div>
+</header>
+
+<nav>
+  <button class="active" data-tab="overview">Overview</button>
+  <button data-tab="vehicles">Vehicles</button>
+  <button data-tab="events">Events</button>
+  <button data-tab="runs">Run Log</button>
+  <button data-tab="settings">Settings</button>
+</nav>
+
+<main>
+  <!-- OVERVIEW -->
+  <div class="tab-pane active" id="tab-overview">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+      <label style="font-size:0.85rem;color:var(--muted)">State</label>
+      <select id="overviewStateFilter" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 12px;font-size:0.85rem">
+        <option value="">All states</option>
+      </select>
+    </div>
+    <div class="status-grid" id="statusGrid"></div>
+
+    <!-- Australia map -->
+    <div class="chart-section" style="margin-bottom:28px">
+      <h2>Stock by state</h2>
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+        <div style="flex:1;min-width:320px;max-width:560px">
+          <svg id="auMap" viewBox="0 0 560 480" style="width:100%;height:auto"></svg>
+        </div>
+        <div style="flex:0 0 180px">
+          <div id="mapLegend" style="display:flex;flex-direction:column;gap:8px"></div>
+          <div id="mapTooltip" style="margin-top:20px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:0.82rem;display:none"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart-section">
+      <h2>Stock levels — last 30 days</h2>
+      <div class="chart-controls" id="chartControls"></div>
+      <canvas id="stockChart"></canvas>
+    </div>
+  </div>
+
+  <!-- VEHICLES -->
+  <div class="tab-pane" id="tab-vehicles">
+    <div class="table-controls">
+      <input type="text" id="vehicleSearch" placeholder="Search VIN, colour…" style="flex:1;min-width:180px">
+      <select id="vehicleWatchFilter"><option value="">All models</option></select>
+      <select id="vehicleTrimFilter"><option value="">All variants</option></select>
+      <select id="vehicleStateFilter"><option value="">All states</option></select>
+      <select id="vehicleStatus">
+        <option value="">All vehicles</option>
+        <option value="active">In stock</option>
+        <option value="removed">Removed</option>
+      </select>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>Model</th><th>Year</th><th>Trim</th><th>Price</th><th>Subtotal</th>
+          <th>Colour</th><th>Interior</th><th>Wheels</th><th>Location</th>
+          <th>Odo</th><th>VIN</th><th>First seen</th><th>Status</th>
+        </tr></thead>
+        <tbody id="vehicleTbody"></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <button id="vPrev" disabled>← Prev</button>
+      <span id="vPageInfo" style="font-size:0.82rem;color:var(--muted);line-height:2"></span>
+      <button id="vNext">Next →</button>
+    </div>
+  </div>
+
+  <!-- EVENTS -->
+  <div class="tab-pane" id="tab-events">
+    <div class="table-controls">
+      <select id="eventWatchFilter"><option value="">All models</option></select>
+      <select id="eventTypeFilter">
+        <option value="">All events</option>
+        <option value="added">New stock</option>
+        <option value="price_drop">Price drop</option>
+        <option value="removed">Removed</option>
+      </select>
+    </div>
+    <div class="events-list" id="eventsList"></div>
+  </div>
+
+  <!-- RUNS -->
+  <div class="tab-pane" id="tab-runs">
+    <div class="table-controls">
+      <select id="runWatchFilter"><option value="">All models</option></select>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr><th>Time</th><th>Model</th><th>Status</th><th>Vehicles</th><th>Added</th><th>Removed</th><th>Updated</th></tr></thead>
+        <tbody id="runsTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div class="tab-pane" id="tab-settings">
+    <div class="settings-grid">
+
+      <!-- iMessage -->
+      <div class="settings-card">
+        <h3>iMessage Notifications</h3>
+        <div class="toggle-row">
+          <span>Enable iMessage</span>
+          <label class="toggle"><input type="checkbox" id="imsgEnabled"><span class="slider"></span></label>
+        </div>
+        <div class="field" style="margin-top:14px">
+          <label>Destination (phone or iCloud email)</label>
+          <input type="text" id="imsgTo" placeholder="+61412345678 or you@icloud.com">
+        </div>
+        <div class="field">
+          <label>Notify on</label>
+          <div class="checkbox-group" style="margin-top:4px">
+            <label class="checkbox-row"><input type="checkbox" id="triggerNewStock"> New stock</label>
+            <label class="checkbox-row"><input type="checkbox" id="triggerPriceDrop"> Price drops</label>
+          </div>
+        </div>
+        <div class="save-row">
+          <button class="btn btn-primary" id="saveImsg">Save</button>
+          <span class="save-msg" id="saveImsgMsg"></span>
+        </div>
+      </div>
+
+      <!-- Notification filters -->
+      <div class="settings-card">
+        <h3>Notification Filters</h3>
+        <p style="font-size:0.8rem;color:var(--muted);margin-bottom:14px">Only vehicles matching ALL set filters will trigger an iMessage. Leave blank to match everything.</p>
+
+        <div class="field">
+          <label>Models to notify on</label>
+          <div class="checkbox-group" style="margin-top:4px">
+            <label class="checkbox-row"><input type="checkbox" class="model-cb" value="my"> Model Y</label>
+            <label class="checkbox-row"><input type="checkbox" class="model-cb" value="m3"> Model 3</label>
+            <label class="checkbox-row"><input type="checkbox" class="model-cb" value="ms"> Model S</label>
+            <label class="checkbox-row"><input type="checkbox" class="model-cb" value="mx"> Model X</label>
+          </div>
+          <div class="hint">Unchecking all = notify on all models</div>
+        </div>
+
+        <div class="field">
+          <label>Variants / trim keywords</label>
+          <div class="tag-input-wrap" id="variantTagWrap">
+            <input type="text" class="tag-input" id="variantTagInput" placeholder="Type and press Enter…">
+          </div>
+          <div class="hint">Partial match on trim name, e.g. "Performance", "RWD", "Long Range", "AWD"</div>
+        </div>
+
+        <div class="field">
+          <label>States to notify on</label>
+          <div class="tag-input-wrap" id="stateTagWrap">
+            <input type="text" class="tag-input" id="stateTagInput" placeholder="VIC, NSW, QLD…">
+          </div>
+          <div class="hint">Leave empty = all states</div>
+        </div>
+
+        <div class="field">
+          <label>Max price (drive-away, AUD)</label>
+          <input type="number" id="maxPrice" placeholder="e.g. 95000 — leave blank for no limit">
+        </div>
+
+        <div class="toggle-row">
+          <span>FBT eligible only (subtotal ≤ $91,387)</span>
+          <label class="toggle"><input type="checkbox" id="fbtOnly"><span class="slider"></span></label>
+        </div>
+
+        <div class="save-row" style="margin-top:16px">
+          <button class="btn btn-primary" id="saveFilters">Save</button>
+          <span class="save-msg" id="saveFiltersMsg"></span>
+        </div>
+      </div>
+
+      <!-- Scheduler -->
+      <div class="settings-card">
+        <h3>Scheduler</h3>
+        <div class="scheduler-status" id="schedulerStatus">
+          <div style="color:var(--muted);font-size:0.85rem">Loading…</div>
+        </div>
+        <div class="field" style="margin-top:18px">
+          <label>Check frequency</label>
+          <div style="display:flex;gap:10px;align-items:center">
+            <select id="checkerInterval" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 12px;font-size:0.9rem">
+              <option value="60">Every 1 minute</option>
+              <option value="120">Every 2 minutes</option>
+              <option value="300">Every 5 minutes</option>
+              <option value="600">Every 10 minutes</option>
+              <option value="900">Every 15 minutes</option>
+              <option value="1800">Every 30 minutes</option>
+              <option value="3600">Every hour</option>
+            </select>
+            <button class="btn btn-primary" id="saveInterval">Apply</button>
+            <span class="save-msg" id="saveIntervalMsg"></span>
+          </div>
+          <div class="hint">Changes the plist and reloads the checker immediately.</div>
+        </div>
+        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-secondary" id="reloadServer">Restart server</button>
+        </div>
+      </div>
+
+      <!-- Polling / timing -->
+      <div class="settings-card">
+        <h3>Advanced</h3>
+        <div class="field">
+          <label>API wait time (ms)</label>
+          <input type="number" id="waitMs" placeholder="8000">
+          <div class="hint">How long to wait for Tesla API responses per page load</div>
+        </div>
+        <div class="field">
+          <label>FBT exemption threshold (AUD)</label>
+          <input type="number" id="fbtThreshold" placeholder="91387">
+        </div>
+        <div class="field">
+          <label>Sort order</label>
+          <select id="sortOrder" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 12px;font-size:0.9rem">
+            <option value="plh">Price: low to high</option>
+            <option value="phl">Price: high to low</option>
+            <option value="n">Newest first</option>
+          </select>
+        </div>
+        <div class="save-row">
+          <button class="btn btn-primary" id="saveAdvanced">Save</button>
+          <span class="save-msg" id="saveAdvancedMsg"></span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</main>
+
+<script>
+const FBT_THRESHOLD = 91387;
+let watches = [];
+let stockChart = null;
+let activeChartWatchIds = new Set();
+let vehiclePage = 0;
+const VEHICLE_LIMIT = 50;
+
+// ── Tab navigation ───────────────────────────────────────────────────────────
+document.querySelectorAll("nav button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("nav button").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById(`tab-${btn.dataset.tab}`).classList.add("active");
+    const loaders = { overview: loadOverview, vehicles: () => { loadTrims(); loadVehicles(); }, events: loadEvents, runs: loadRuns, settings: loadSettings };
+    loaders[btn.dataset.tab]?.();
+  });
+});
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function fmt(date) {
+  if (!date) return "—";
+  // SQLite stores UTC as "YYYY-MM-DD HH:MM:SS" (space, no Z) — normalise to ISO before parsing
+  const iso = String(date).replace(" ", "T").replace(/Z?$/, "Z");
+  return new Date(iso).toLocaleString("en-AU", { timeZone: "Australia/Melbourne", hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+function fmtPrice(p) { return p ? "$" + Number(p).toLocaleString() : "—"; }
+function fbtBadge(subtotal) {
+  if (!subtotal) return "";
+  const s = Number(subtotal);
+  if (s <= FBT_THRESHOLD) return `<span class="fbt-ok">FBT ✓</span>`;
+  return `<span class="fbt-over">FBT +$${(s - FBT_THRESHOLD).toLocaleString()}</span>`;
+}
+const MODEL_NAMES = { my: "Model Y", m3: "Model 3", ms: "Model S", mx: "Model X" };
+function modelLabel(m) { return MODEL_NAMES[m] || m?.toUpperCase() || "—"; }
+async function apiFetch(url, opts) {
+  const r = await fetch(url, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+function showMsg(elId, text, isErr) {
+  const el = document.getElementById(elId);
+  el.textContent = text;
+  el.className = "save-msg " + (isErr ? "err" : "ok");
+  setTimeout(() => { el.textContent = ""; }, 3000);
+}
+function populateWatchSelect(sel, watchList) {
+  const val = sel.value;
+  sel.innerHTML = `<option value="">All models</option>`;
+  watchList.forEach(w => {
+    const o = document.createElement("option");
+    o.value = w.id; o.textContent = w.label;
+    if (String(w.id) === val) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+// ── Tag input helper ─────────────────────────────────────────────────────────
+function buildTagInput(wrapId, inputId, initialValues = []) {
+  const wrap = document.getElementById(wrapId);
+  const input = document.getElementById(inputId);
+  const tags = new Set(initialValues.map(v => v.trim()).filter(Boolean));
+
+  function render() {
+    wrap.querySelectorAll(".tag").forEach(t => t.remove());
+    tags.forEach(tag => {
+      const el = document.createElement("div");
+      el.className = "tag";
+      el.innerHTML = `<span>${tag}</span><button type="button">×</button>`;
+      el.querySelector("button").onclick = () => { tags.delete(tag); render(); };
+      wrap.insertBefore(el, input);
+    });
+  }
+
+  input.addEventListener("keydown", e => {
+    if ((e.key === "Enter" || e.key === ",") && input.value.trim()) {
+      e.preventDefault();
+      tags.add(input.value.trim().toUpperCase());
+      input.value = "";
+      render();
+    }
+    if (e.key === "Backspace" && !input.value && tags.size) {
+      tags.delete([...tags].at(-1));
+      render();
+    }
+  });
+
+  wrap.addEventListener("click", () => input.focus());
+  render();
+  // flush any unconfirmed text in the input when reading
+  function getAll() {
+    const pending = input.value.trim();
+    if (pending) { tags.add(pending.toUpperCase()); input.value = ""; render(); }
+    return [...tags];
+  }
+  return { get: getAll, set: (vals) => { tags.clear(); vals.forEach(v => tags.add(v.trim().toUpperCase())); render(); } };
+}
+
+// ── Overview ─────────────────────────────────────────────────────────────────
+let overviewState = "";
+
+async function loadOverview() {
+  const stateParam = overviewState ? `?state=${overviewState}` : "";
+  const [status, wList, allStates] = await Promise.all([
+    apiFetch("/api/status" + stateParam),
+    apiFetch("/api/watches"),
+    apiFetch("/api/states"),
+  ]);
+  watches = wList;
+
+  // Populate state dropdown
+  const sel = document.getElementById("overviewStateFilter");
+  const prev = sel.value;
+  sel.innerHTML = `<option value="">All states</option>`;
+  allStates.forEach(s => {
+    const o = document.createElement("option");
+    o.value = s; o.textContent = s;
+    if (s === prev) o.selected = true;
+    sel.appendChild(o);
+  });
+
+  const grid = document.getElementById("statusGrid");
+  grid.innerHTML = status.map(w => {
+    const hasStock = w.active_count > 0;
+    const dotClass = !w.last_status ? "dot-unknown" : (w.last_status === "inventory" || w.last_status === "no-stock") ? "dot-ok" : "dot-error";
+    return `<div class="status-card">
+      <div class="watch-name">${w.label}</div>
+      <div class="count ${hasStock ? "has-stock" : "no-stock"}">${w.active_count}</div>
+      <div class="meta"><span class="status-dot ${dotClass}"></span>${w.last_status || "never run"} · ${fmt(w.last_run)}</div>
+    </div>`;
+  }).join("");
+  document.getElementById("lastUpdated").textContent = "Updated " + fmt(new Date().toISOString());
+  await Promise.all([loadStockChart(wList), loadMap()]);
+}
+
+document.getElementById("overviewStateFilter").addEventListener("change", e => {
+  overviewState = e.target.value;
+  loadOverview();
+});
+
+// ── Australia Map ─────────────────────────────────────────────────────────────
+
+// Approximate SVG paths for Australian states (viewBox 0 0 560 480)
+const AU_PATHS = {
+  WA:  { d: "M 10 30 L 185 30 L 185 390 L 10 390 Z", cx: 97, cy: 210 },
+  NT:  { d: "M 185 30 L 310 30 L 310 220 L 185 220 Z", cx: 247, cy: 125 },
+  SA:  { d: "M 185 220 L 310 220 L 310 360 L 240 390 L 185 390 Z", cx: 245, cy: 300 },
+  QLD: { d: "M 310 30 L 480 30 L 480 270 L 310 270 L 310 30 Z", cx: 395, cy: 150 },
+  NSW: { d: "M 310 270 L 480 270 L 460 370 L 350 390 L 310 360 Z", cx: 395, cy: 325 },
+  VIC: { d: "M 310 360 L 350 390 L 430 400 L 420 430 L 310 420 Z", cx: 368, cy: 400 },
+  TAS: { d: "M 360 445 L 420 445 L 420 475 L 360 475 Z", cx: 390, cy: 460 },
+  ACT: { d: "M 390 355 L 415 355 L 415 375 L 390 375 Z", cx: 402, cy: 365 },
+};
+
+const MODEL_COLORS = { my: "#e82127", m3: "#3b82f6" };
+const MODEL_LABELS = { my: "Model Y", m3: "Model 3" };
+
+async function loadMap() {
+  const stockData = await apiFetch("/api/stock-by-state");
+
+  // Build: { state: { model: count } }
+  const byState = {};
+  for (const row of stockData) {
+    if (!byState[row.location]) byState[row.location] = {};
+    byState[row.location][row.model] = (byState[row.location][row.model] || 0) + row.count;
+  }
+
+  const maxCount = Math.max(1, ...stockData.map(r => r.count));
+  const models = [...new Set(stockData.map(r => r.model))];
+
+  const svg = document.getElementById("auMap");
+  svg.innerHTML = "";
+
+  const ns = "http://www.w3.org/2000/svg";
+
+  // Draw state shapes
+  for (const [state, { d, cx, cy }] of Object.entries(AU_PATHS)) {
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", d);
+    path.setAttribute("class", "au-state");
+    path.setAttribute("data-state", state);
+    svg.appendChild(path);
+
+    const label = document.createElementNS(ns, "text");
+    label.setAttribute("x", cx);
+    label.setAttribute("y", cy - 18);
+    label.setAttribute("class", "au-state-label");
+    label.textContent = state;
+    svg.appendChild(label);
+  }
+
+  // Draw bubbles — one per model per state, offset horizontally
+  const tooltip = document.getElementById("mapTooltip");
+  const modelList = ["my", "m3"];
+  const offsets = { my: -10, m3: 10 };
+
+  for (const [state, { cx, cy }] of Object.entries(AU_PATHS)) {
+    const counts = byState[state] || {};
+    for (const model of modelList) {
+      const count = counts[model] || 0;
+      if (count === 0) continue;
+      const r = 6 + (count / maxCount) * 20;
+      const circle = document.createElementNS(ns, "circle");
+      circle.setAttribute("cx", cx + offsets[model]);
+      circle.setAttribute("cy", cy);
+      circle.setAttribute("r", r);
+      circle.setAttribute("fill", MODEL_COLORS[model] || "#888");
+      circle.setAttribute("class", "map-bubble");
+
+      circle.addEventListener("mouseenter", () => {
+        tooltip.style.display = "block";
+        tooltip.innerHTML = `<strong>${state}</strong><br>${MODEL_LABELS[model]}: <strong>${count}</strong> in stock`;
+      });
+      circle.addEventListener("mouseleave", () => { tooltip.style.display = "none"; });
+
+      svg.appendChild(circle);
+
+      // Count label inside bubble
+      if (r > 10) {
+        const t = document.createElementNS(ns, "text");
+        t.setAttribute("x", cx + offsets[model]);
+        t.setAttribute("y", cy + 4);
+        t.setAttribute("text-anchor", "middle");
+        t.setAttribute("font-size", "10");
+        t.setAttribute("fill", "#fff");
+        t.setAttribute("font-weight", "600");
+        t.setAttribute("pointer-events", "none");
+        t.textContent = count;
+        svg.appendChild(t);
+      }
+    }
+  }
+
+  // Legend
+  const legend = document.getElementById("mapLegend");
+  legend.innerHTML = modelList.map(m => `
+    <div style="display:flex;align-items:center;gap:8px;font-size:0.82rem">
+      <div style="width:12px;height:12px;border-radius:50%;background:${MODEL_COLORS[m]};flex-shrink:0"></div>
+      <span>${MODEL_LABELS[m]}</span>
+      <span style="color:var(--muted);margin-left:auto">${
+        Object.values(byState).reduce((s, st) => s + (st[m] || 0), 0)
+      } total</span>
+    </div>`).join("");
+}
+
+async function loadStockChart(wList) {
+  const history = await apiFetch("/api/history/stock?days=30");
+  const byWatch = {};
+  for (const row of history) { if (!byWatch[row.watch_id]) byWatch[row.watch_id] = {}; byWatch[row.watch_id][row.date] = row; }
+  const dates = [...new Set(history.map(r => r.date))].sort();
+  const controls = document.getElementById("chartControls");
+  controls.innerHTML = "";
+  if (activeChartWatchIds.size === 0) wList.forEach(w => activeChartWatchIds.add(w.id));
+  wList.forEach(w => {
+    const chip = document.createElement("button");
+    chip.className = "chip" + (activeChartWatchIds.has(w.id) ? " active" : "");
+    chip.textContent = w.label;
+    chip.onclick = () => { if (activeChartWatchIds.has(w.id)) activeChartWatchIds.delete(w.id); else activeChartWatchIds.add(w.id); loadStockChart(wList); };
+    controls.appendChild(chip);
+  });
+  const COLORS = ["#e82127","#3b82f6","#2db85e","#f59e0b","#a855f7","#ec4899"];
+  const datasets = wList.filter(w => activeChartWatchIds.has(w.id)).map((w, i) => ({
+    label: w.label,
+    data: dates.map(d => byWatch[w.id]?.[d]?.max_count ?? null),
+    borderColor: COLORS[i % COLORS.length], backgroundColor: COLORS[i % COLORS.length] + "22",
+    tension: 0.3, fill: false, spanGaps: true,
+  }));
+  if (stockChart) stockChart.destroy();
+  stockChart = new Chart(document.getElementById("stockChart"), {
+    type: "line", data: { labels: dates, datasets },
+    options: {
+      responsive: true, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { labels: { color: "#aaa", boxWidth: 14 } } },
+      scales: {
+        x: { ticks: { color: "#888", maxTicksLimit: 15 }, grid: { color: "#1e1e1e" } },
+        y: { ticks: { color: "#888" }, grid: { color: "#1e1e1e" }, beginAtZero: true },
+      },
+    },
+  });
+}
+
+// ── Vehicles ─────────────────────────────────────────────────────────────────
+let vehicleFilters = { search: "", watchId: "", trim: "", stateFilter: "", status: "" };
+
+async function loadTrims() {
+  const params = new URLSearchParams();
+  if (vehicleFilters.watchId) params.set("watch_id", vehicleFilters.watchId);
+  const trims = await apiFetch("/api/trims?" + params);
+  const sel = document.getElementById("vehicleTrimFilter");
+  const prev = vehicleFilters.trim;
+  sel.innerHTML = `<option value="">All variants</option>`;
+  trims.forEach(t => {
+    const o = document.createElement("option");
+    o.value = t.trim; o.textContent = t.trim;
+    if (t.trim === prev) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+async function loadVehicles(resetPage = false) {
+  if (resetPage) vehiclePage = 0;
+  const params = new URLSearchParams({ limit: VEHICLE_LIMIT, offset: vehiclePage * VEHICLE_LIMIT });
+  if (vehicleFilters.watchId) params.set("watch_id", vehicleFilters.watchId);
+  if (vehicleFilters.trim) params.set("trim", vehicleFilters.trim);
+  if (vehicleFilters.status === "active") params.set("active", "true");
+  if (vehicleFilters.status === "removed") params.set("active", "false");
+  const data = await apiFetch("/api/vehicles?" + params);
+  if (watches.length === 0) watches = await apiFetch("/api/watches");
+  populateWatchSelect(document.getElementById("vehicleWatchFilter"), watches);
+  const stateSelect = document.getElementById("vehicleStateFilter");
+  const existing = vehicleFilters.stateFilter;
+  const allStates = [...new Set(data.map(v => v.location).filter(Boolean))].sort();
+  stateSelect.innerHTML = `<option value="">All states</option>`;
+  allStates.forEach(s => { const o = document.createElement("option"); o.value = s; o.textContent = s; if (s === existing) o.selected = true; stateSelect.appendChild(o); });
+  let filtered = data;
+  if (vehicleFilters.search) {
+    const q = vehicleFilters.search.toLowerCase();
+    filtered = data.filter(v => [v.vin, v.trim, v.exterior, v.interior, v.location, v.city].some(f => f?.toLowerCase().includes(q)));
+  }
+  if (vehicleFilters.stateFilter) filtered = filtered.filter(v => v.location === vehicleFilters.stateFilter);
+  const tbody = document.getElementById("vehicleTbody");
+  tbody.innerHTML = filtered.length ? filtered.map(v => `<tr>
+    <td><strong>${modelLabel(v.watch_model)}</strong></td>
+    <td>${v.year || "—"}</td><td>${v.trim || "—"}</td>
+    <td>${fmtPrice(v.price)}</td>
+    <td>${fmtPrice(v.subtotal)} ${fbtBadge(v.subtotal)}</td>
+    <td>${v.exterior || "—"}</td><td>${v.interior || "—"}</td><td>${v.wheels || "—"}</td>
+    <td>${[v.city, v.location].filter(Boolean).join(", ") || "—"}</td>
+    <td>${v.odometer ? v.odometer + " km" : "—"}</td>
+    <td style="font-size:0.75rem;color:var(--muted)">${v.vin || "—"}</td>
+    <td style="white-space:nowrap">${fmt(v.first_seen_at)}</td>
+    <td>${v.removed_at ? '<span class="badge badge-red">Gone</span>' : '<span class="badge badge-green">In Stock</span>'}</td>
+  </tr>`).join("") : `<tr><td colspan="13" class="no-data">No vehicles found</td></tr>`;
+  document.getElementById("vPageInfo").textContent = `Page ${vehiclePage + 1}`;
+  document.getElementById("vPrev").disabled = vehiclePage === 0;
+  document.getElementById("vNext").disabled = filtered.length < VEHICLE_LIMIT;
+}
+document.getElementById("vehicleSearch").addEventListener("input", e => { vehicleFilters.search = e.target.value; loadVehicles(true); });
+document.getElementById("vehicleWatchFilter").addEventListener("change", e => { vehicleFilters.watchId = e.target.value; vehicleFilters.trim = ""; loadTrims(); loadVehicles(true); });
+document.getElementById("vehicleTrimFilter").addEventListener("change", e => { vehicleFilters.trim = e.target.value; loadVehicles(true); });
+document.getElementById("vehicleStateFilter").addEventListener("change", e => { vehicleFilters.stateFilter = e.target.value; loadVehicles(true); });
+document.getElementById("vehicleStatus").addEventListener("change", e => { vehicleFilters.status = e.target.value; loadVehicles(true); });
+document.getElementById("vPrev").addEventListener("click", () => { vehiclePage--; loadVehicles(); });
+document.getElementById("vNext").addEventListener("click", () => { vehiclePage++; loadVehicles(); });
+
+// ── Events ────────────────────────────────────────────────────────────────────
+async function loadEvents() {
+  if (watches.length === 0) watches = await apiFetch("/api/watches");
+  populateWatchSelect(document.getElementById("eventWatchFilter"), watches);
+  const watchId = document.getElementById("eventWatchFilter").value;
+  const type = document.getElementById("eventTypeFilter").value;
+  const params = new URLSearchParams({ limit: 100 });
+  if (watchId) params.set("watch_id", watchId);
+  if (type) params.set("type", type);
+  const events = await apiFetch("/api/events?" + params);
+  const icons = { added: "🟢", price_drop: "🔵", removed: "🔴" };
+  const labels = { added: "New stock", price_drop: "Price drop", removed: "Removed" };
+  document.getElementById("eventsList").innerHTML = events.length ? events.map(e => {
+    const priceStr = e.event_type === "price_drop" && e.prior_price
+      ? `${fmtPrice(e.price)} (was ${fmtPrice(e.prior_price)})` : fmtPrice(e.price);
+    return `<div class="event-item">
+      <div class="event-icon">${icons[e.event_type] || "⚪"}</div>
+      <div class="event-detail">
+        <div class="ev-title">${labels[e.event_type] || e.event_type} · ${e.watch_label}</div>
+        <div class="ev-meta">${e.vehicle_id} · ${priceStr} · ${fmt(e.occurred_at)}${e.notified ? " · <span style='color:var(--green)'>notified</span>" : ""}</div>
+      </div>
+    </div>`;
+  }).join("") : `<div class="no-data">No events found</div>`;
+}
+document.getElementById("eventWatchFilter").addEventListener("change", loadEvents);
+document.getElementById("eventTypeFilter").addEventListener("change", loadEvents);
+
+// ── Runs ──────────────────────────────────────────────────────────────────────
+async function loadRuns() {
+  if (watches.length === 0) watches = await apiFetch("/api/watches");
+  populateWatchSelect(document.getElementById("runWatchFilter"), watches);
+  const watchId = document.getElementById("runWatchFilter").value;
+  const params = new URLSearchParams({ limit: 100 });
+  if (watchId) params.set("watch_id", watchId);
+  const runs = await apiFetch("/api/runs?" + params);
+  const statusBadge = s => {
+    if (s === "inventory" || s === "no-stock") return `<span class="badge badge-green">${s}</span>`;
+    if (s === "blocked" || s === "error") return `<span class="badge badge-red">${s}</span>`;
+    return `<span class="badge badge-blue">${s}</span>`;
+  };
+  document.getElementById("runsTbody").innerHTML = runs.length ? runs.map(r => `<tr>
+    <td style="white-space:nowrap">${fmt(r.ran_at)}</td><td>${r.watch_label}</td>
+    <td>${statusBadge(r.status)}</td><td>${r.vehicle_count}</td>
+    <td>${r.added > 0 ? `<span style="color:var(--green)">+${r.added}</span>` : r.added}</td>
+    <td>${r.removed > 0 ? `<span style="color:#f87171">-${r.removed}</span>` : r.removed}</td>
+    <td>${r.updated > 0 ? `<span style="color:var(--yellow)">${r.updated}</span>` : r.updated}</td>
+  </tr>`).join("") : `<tr><td colspan="7" class="no-data">No runs recorded</td></tr>`;
+}
+document.getElementById("runWatchFilter").addEventListener("change", loadRuns);
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+let variantTags, stateTags;
+
+async function loadSettings() {
+  const cfg = await apiFetch("/api/config");
+  const imsg = cfg.notify?.imessage ?? {};
+  const filters = cfg.notify?.filters ?? {};
+  const triggers = cfg.notify?.triggers ?? ["new_stock", "price_drop"];
+
+  document.getElementById("imsgEnabled").checked = !!imsg.enabled;
+  document.getElementById("imsgTo").value = imsg.to ?? "";
+  document.getElementById("triggerNewStock").checked = triggers.includes("new_stock");
+  document.getElementById("triggerPriceDrop").checked = triggers.includes("price_drop");
+
+  document.querySelectorAll(".model-cb").forEach(cb => {
+    cb.checked = !filters.models?.length || filters.models.includes(cb.value);
+  });
+
+  const variantVals = (filters.variants ?? []).map(v => v);
+  if (!variantTags) {
+    variantTags = buildTagInput("variantTagWrap", "variantTagInput", variantVals);
+  } else {
+    variantTags.set(variantVals);
+  }
+
+  const stateVals = (filters.states ?? []);
+  if (!stateTags) {
+    stateTags = buildTagInput("stateTagWrap", "stateTagInput", stateVals);
+  } else {
+    stateTags.set(stateVals);
+  }
+
+  document.getElementById("maxPrice").value = filters.maxPrice ?? "";
+  document.getElementById("fbtOnly").checked = !!filters.fbtOnly;
+  document.getElementById("waitMs").value = cfg.waitMs ?? 8000;
+  document.getElementById("fbtThreshold").value = cfg.fbtThreshold ?? 91387;
+  document.getElementById("sortOrder").value = cfg.sort ?? "plh";
+
+  await loadSchedulerStatus();
+
+  const { seconds } = await apiFetch("/api/scheduler/interval");
+  const sel = document.getElementById("checkerInterval");
+  // Select closest option, or nearest lower value
+  const opts = [...sel.options].map(o => Number(o.value));
+  const best = opts.reduce((a, b) => Math.abs(b - seconds) < Math.abs(a - seconds) ? b : a);
+  sel.value = best;
+}
+
+async function loadSchedulerStatus() {
+  const [sched, status] = await Promise.all([apiFetch("/api/scheduler"), apiFetch("/api/status")]);
+  const lastRun = status.length ? fmt(status.reduce((a, b) => (a.last_run > b.last_run ? a : b)).last_run) : "never";
+
+  const checkerPill = sched.checker.lastExitStatus === 0
+    ? `<span class="pill pill-green">OK · last run ${lastRun}</span>`
+    : sched.checker.lastExitStatus != null
+      ? `<span class="pill pill-red">Exit ${sched.checker.lastExitStatus}</span>`
+      : `<span class="pill pill-muted">Not run yet</span>`;
+
+  const serverPill = sched.server.running
+    ? `<span class="pill pill-green">Running · PID ${sched.server.pid}</span>`
+    : `<span class="pill pill-red">Stopped</span>`;
+
+  document.getElementById("schedulerStatus").innerHTML = `
+    <div class="sched-row">
+      <div class="sched-info"><div class="sched-label">Checker</div><div class="sched-meta">com.tesla-watch.checker · runs periodically then exits</div></div>
+      ${checkerPill}
+    </div>
+    <div class="sched-row">
+      <div class="sched-info"><div class="sched-label">Web server</div><div class="sched-meta">com.tesla-watch.server · always on</div></div>
+      ${serverPill}
+    </div>`;
+}
+
+document.getElementById("saveImsg").addEventListener("click", async () => {
+  const btn = document.getElementById("saveImsg");
+  btn.disabled = true;
+  try {
+    const triggers = [];
+    if (document.getElementById("triggerNewStock").checked) triggers.push("new_stock");
+    if (document.getElementById("triggerPriceDrop").checked) triggers.push("price_drop");
+    await apiFetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        notify: {
+          imessage: {
+            enabled: document.getElementById("imsgEnabled").checked,
+            to: document.getElementById("imsgTo").value.trim(),
+          },
+          triggers,
+        },
+      }),
+    });
+    showMsg("saveImsgMsg", "Saved", false);
+  } catch (err) {
+    showMsg("saveImsgMsg", err.message, true);
+  } finally { btn.disabled = false; }
+});
+
+document.getElementById("saveFilters").addEventListener("click", async () => {
+  const btn = document.getElementById("saveFilters");
+  btn.disabled = true;
+  try {
+    const checkedModels = [...document.querySelectorAll(".model-cb:checked")].map(cb => cb.value);
+    const allModels = [...document.querySelectorAll(".model-cb")].map(cb => cb.value);
+    const models = checkedModels.length === allModels.length ? null : checkedModels.length ? checkedModels : null;
+
+    const variants = variantTags.get();
+    const states = stateTags.get();
+    const maxPriceRaw = document.getElementById("maxPrice").value.trim();
+
+    await apiFetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        notify: {
+          filters: {
+            models: models,
+            variants: variants.length ? variants : null,
+            states: states.length ? states : null,
+            maxPrice: maxPriceRaw ? Number(maxPriceRaw) : null,
+            fbtOnly: document.getElementById("fbtOnly").checked,
+          },
+        },
+      }),
+    });
+    showMsg("saveFiltersMsg", "Saved", false);
+  } catch (err) {
+    showMsg("saveFiltersMsg", err.message, true);
+  } finally { btn.disabled = false; }
+});
+
+document.getElementById("saveAdvanced").addEventListener("click", async () => {
+  const btn = document.getElementById("saveAdvanced");
+  btn.disabled = true;
+  try {
+    await apiFetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        waitMs: Number(document.getElementById("waitMs").value),
+        fbtThreshold: Number(document.getElementById("fbtThreshold").value),
+        sort: document.getElementById("sortOrder").value,
+      }),
+    });
+    showMsg("saveAdvancedMsg", "Saved", false);
+  } catch (err) {
+    showMsg("saveAdvancedMsg", err.message, true);
+  } finally { btn.disabled = false; }
+});
+
+document.getElementById("saveInterval").addEventListener("click", async () => {
+  const btn = document.getElementById("saveInterval");
+  btn.disabled = true;
+  try {
+    const seconds = Number(document.getElementById("checkerInterval").value);
+    await apiFetch("/api/scheduler/interval", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seconds }) });
+    showMsg("saveIntervalMsg", "Applied — checker reloaded", false);
+    await loadSchedulerStatus();
+  } catch (err) {
+    showMsg("saveIntervalMsg", err.message, true);
+  } finally { btn.disabled = false; }
+});
+
+
+document.getElementById("reloadServer").addEventListener("click", async () => {
+  const btn = document.getElementById("reloadServer");
+  btn.disabled = true;
+  btn.textContent = "Restarting…";
+  try {
+    await apiFetch("/api/scheduler/reload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ target: "server" }) });
+    // Wait for launchd to restart the process, then refresh status
+    await new Promise(r => setTimeout(r, 3000));
+    await loadSchedulerStatus();
+  } catch {
+    // Expected — connection may drop during restart
+    await new Promise(r => setTimeout(r, 3000));
+    await loadSchedulerStatus();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Restart server";
+  }
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadOverview();
+</script>
+</body>
+</html>
