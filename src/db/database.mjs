@@ -250,9 +250,11 @@ export function queryEvents(db, { watchId, type, limit = 100, offset = 0 } = {})
   if (watchId != null) { where += " AND e.watch_id = ?"; params.push(watchId); }
   if (type)            { where += " AND e.event_type = ?"; params.push(type); }
   return db.prepare(`
-    SELECT e.*, w.label as watch_label
+    SELECT e.*, w.label as watch_label, w.model as watch_model,
+           v.location, v.trim as vehicle_trim
     FROM events e
     JOIN watches w ON w.id = e.watch_id
+    LEFT JOIN vehicles v ON v.id = e.vehicle_id AND v.watch_id = e.watch_id
     WHERE ${where}
     ORDER BY e.occurred_at DESC
     LIMIT ? OFFSET ?
@@ -277,9 +279,14 @@ export function queryStockHistory(db, { watchId, days = 30 } = {}) {
   const params = [];
   let watchFilter = "";
   if (watchId != null) { watchFilter = "AND watch_id = ?"; params.push(watchId); }
+  // Use local UTC offset so date boundaries match the user's timezone (AEST/AEDT)
+  const offsetMins = -new Date().getTimezoneOffset();
+  const offsetStr = (offsetMins >= 0 ? "+" : "-") +
+    String(Math.floor(Math.abs(offsetMins) / 60)).padStart(2, "0") + ":" +
+    String(Math.abs(offsetMins) % 60).padStart(2, "0");
   return db.prepare(`
     SELECT
-      date(ran_at) as date,
+      date(ran_at, '${offsetStr}') as date,
       watch_id,
       AVG(vehicle_count) as avg_count,
       MAX(vehicle_count) as max_count,
@@ -289,7 +296,7 @@ export function queryStockHistory(db, { watchId, days = 30 } = {}) {
     FROM runs
     WHERE ran_at >= datetime('now', '-${days} days')
     ${watchFilter}
-    GROUP BY date(ran_at), watch_id
+    GROUP BY date(ran_at, '${offsetStr}'), watch_id
     ORDER BY date ASC
   `).all(...params);
 }

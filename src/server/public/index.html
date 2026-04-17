@@ -824,11 +824,12 @@ async function loadEvents() {
   document.getElementById("eventsList").innerHTML = events.length ? events.map(e => {
     const priceStr = e.event_type === "price_drop" && e.prior_price
       ? `${fmtPrice(e.price)} (was ${fmtPrice(e.prior_price)})` : fmtPrice(e.price);
+    const meta = [e.location, modelLabel(e.watch_model), e.vehicle_trim].filter(Boolean).join(" · ");
     return `<div class="event-item">
       <div class="event-icon">${icons[e.event_type] || "⚪"}</div>
       <div class="event-detail">
-        <div class="ev-title">${labels[e.event_type] || e.event_type} · ${e.watch_label}</div>
-        <div class="ev-meta">${e.vehicle_id} · ${priceStr} · ${fmt(e.occurred_at)}${e.notified ? " · <span style='color:var(--green)'>notified</span>" : ""}</div>
+        <div class="ev-title">${labels[e.event_type] || e.event_type} · ${meta}</div>
+        <div class="ev-meta">${priceStr} · ${fmt(e.occurred_at)}${e.notified ? " · <span style='color:var(--green)'>notified</span>" : ""}</div>
       </div>
     </div>`;
   }).join("") : `<div class="no-data">No events found</div>`;
