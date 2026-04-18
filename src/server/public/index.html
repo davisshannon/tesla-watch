@@ -1056,6 +1056,34 @@ document.getElementById("reloadServer").addEventListener("click", async () => {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadOverview();
+
+// ── Auto-refresh on new run ───────────────────────────────────────────────────
+let lastRunId = null;
+
+function activeTab() {
+  return document.querySelector("nav button.active")?.dataset?.tab ?? "overview";
+}
+
+async function pollForNewRun() {
+  try {
+    const runs = await apiFetch("/api/runs?limit=1");
+    const latestId = runs?.[0]?.id;
+    if (lastRunId === null) { lastRunId = latestId; return; }
+    if (latestId !== lastRunId) {
+      lastRunId = latestId;
+      const tab = activeTab();
+      const loaders = {
+        overview:  loadOverview,
+        vehicles:  () => { loadTrims(); loadVehicles(); },
+        events:    loadEvents,
+        runs:      loadRuns,
+      };
+      loaders[tab]?.();
+    }
+  } catch { /* ignore fetch errors between runs */ }
+}
+
+setInterval(pollForNewRun, 60_000);
 </script>
 </body>
 </html>
