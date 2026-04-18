@@ -1,105 +1,79 @@
 import puppeteer from "puppeteer-core";
-import { spawn } from "child_process";
 import { log } from "../utils/log.mjs";
 import { retry, sleep } from "../utils/retry.mjs";
+import { rm, mkdir } from "fs/promises";
+import { existsSync } from "fs";
 
 const CHROME_BINARY =
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
 const CHROME_USER_DATA = `${process.env.HOME}/chrome-tesla-automation`;
 
-/**
- * Check if Chrome is already listening on the debug port.
- */
-async function isChromeRunning(debugUrl) {
+// Realistic Chrome user agent — keeps in sync with whatever version is installed
+const USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
+let _browser = null;
+
+async function clearUserDataDir() {
   try {
-    const res = await fetch(`${debugUrl}/json/version`, {
-      signal: AbortSignal.timeout(2000),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Spawn Chrome in the background with the debug port open.
- * Returns immediately — Chrome continues running after the script exits.
- */
-function spawnChrome(port = 9222) {
-  const args = [
-    `--remote-debugging-port=${port}`,
-    `--user-data-dir=${CHROME_USER_DATA}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-  ];
-  log.info(`Launching Chrome: ${CHROME_BINARY}`);
-  const child = spawn(CHROME_BINARY, args, {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
-  return child;
-}
-
-/**
- * Ensure Chrome is running with the debug port open.
- * If it is not already up, launch it and wait for it to become ready.
- */
-export async function ensureChrome(debugUrl = "http://localhost:9222") {
-  const port = new URL(debugUrl).port || 9222;
-
-  if (await isChromeRunning(debugUrl)) {
-    log.info("Chrome already running on debug port");
-    return;
-  }
-
-  log.info("Chrome not detected — launching it now…");
-  spawnChrome(port);
-
-  for (let i = 0; i < 10; i++) {
-    await sleep(1500);
-    if (await isChromeRunning(debugUrl)) {
-      log.info("Chrome is up");
-      return;
+    if (existsSync(CHROME_USER_DATA)) {
+      await rm(CHROME_USER_DATA, { recursive: true, force: true });
     }
+    await mkdir(CHROME_USER_DATA, { recursive: true });
+    log.info("Cleared Chrome user data dir");
+  } catch (err) {
+    log.warn(`Could not clear user data dir: ${err.message}`);
   }
-  throw new Error(
-    `Chrome did not start within timeout. Check that the binary exists at:\n  ${CHROME_BINARY}`
-  );
 }
 
-/**
- * Connect to the Chrome instance via CDP using puppeteer-core.
- * Call ensureChrome() first if you want auto-launch behaviour.
- */
-export async function connectChrome(debugUrl = "http://localhost:9222") {
+export async function ensureChrome() {
+  // Always start fresh — clear stored fingerprint/cookies before each run
+  await clearUserDataDir();
+}
+
+export async function connectChrome() {
   return retry(
     async () => {
-      log.info(`Connecting to Chrome at ${debugUrl}`);
-      const browser = await puppeteer.connect({
-        browserURL: debugUrl,
-        defaultViewport: null,
+      log.info("Launching Chrome via puppeteer");
+      _browser = await puppeteer.launch({
+        executablePath: CHROME_BINARY,
+        headless: true,
+        userDataDir: CHROME_USER_DATA,
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-blink-features=AutomationControlled",
+          "--disable-infobars",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--window-size=1280,900",
+        ],
+        ignoreDefaultArgs: ["--enable-automation"],
       });
-      log.info("Connected to Chrome");
-      return browser;
+      log.info("Chrome launched");
+      return _browser;
     },
-    { attempts: 3, delayMs: 3000, label: "Chrome connect" }
+    { attempts: 3, delayMs: 3000, label: "Chrome launch" }
   );
 }
 
-/**
- * Get or create a usable page from the browser.
- */
 export async function getPage(browser) {
   const pages = await browser.pages();
   const page = pages[0] || (await browser.newPage());
+
+  // Spoof user agent and hide webdriver fingerprints
+  await page.setUserAgent(USER_AGENT);
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+    Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
+    Object.defineProperty(navigator, "languages", { get: () => ["en-AU", "en"] });
+    window.chrome = { runtime: {} };
+  });
+
   return page;
 }
 
-/**
- * Detect the current state of a Tesla page so the runner knows what happened.
- * Returns one of: "locale-select" | "blocked" | "no-stock" | "inventory" | "loading" | "unknown"
- */
 export async function detectPageState(page) {
   try {
     const bodyText = await page.evaluate(() => document.body?.innerText || "");
@@ -108,16 +82,13 @@ export async function detectPageState(page) {
     if (/choose your region|select your country/i.test(bodyText)) {
       return "locale-select";
     }
-    if (/access denied|blocked|403|captcha/i.test(bodyText)) {
+    if (/access denied|blocked|403|captcha|unusual traffic|bot/i.test(bodyText)) {
       return "blocked";
     }
     if (/no inventory|no vehicles|no results found|0 results/i.test(bodyText)) {
       return "no-stock";
     }
-    if (
-      /\$[0-9,]+/.test(bodyText) &&
-      /model [xysx3]|cybertruck/i.test(bodyText)
-    ) {
+    if (/\$[0-9,]+/.test(bodyText) && /model [xysx3]|cybertruck/i.test(bodyText)) {
       return "inventory";
     }
     if (url.includes("/inventory/")) {
@@ -129,19 +100,12 @@ export async function detectPageState(page) {
   }
 }
 
-/**
- * Navigate to the Tesla inventory URL, optionally handling a locale page first.
- * Returns the final detected page state.
- */
 export async function navigateToInventory(page, inventoryUrl, opts = {}) {
   const { localeBaseUrl = null, waitMs = 8000 } = opts;
 
   if (localeBaseUrl) {
     log.info(`Navigating to locale base: ${localeBaseUrl}`);
-    await page.goto(localeBaseUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 60000,
-    });
+    await page.goto(localeBaseUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
     await sleep(3000);
 
     try {
@@ -158,10 +122,7 @@ export async function navigateToInventory(page, inventoryUrl, opts = {}) {
   }
 
   log.info(`Navigating to inventory URL: ${inventoryUrl}`);
-  await page.goto(inventoryUrl, {
-    waitUntil: "domcontentloaded",
-    timeout: 60000,
-  });
+  await page.goto(inventoryUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
   await sleep(waitMs);
 
   const state = await detectPageState(page);

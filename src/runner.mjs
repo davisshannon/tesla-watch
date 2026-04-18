@@ -1,4 +1,5 @@
 import { ensureChrome, connectChrome, getPage } from "./browser/chrome.mjs";
+import { sleep } from "./utils/retry.mjs";
 import { collectInventory } from "./collectors/teslaInventory.mjs";
 import { diffInventory } from "./state/diffInventory.mjs";
 import { buildNotifier } from "./notify/notifier.mjs";
@@ -57,6 +58,10 @@ export async function runOnce(config) {
       let anyError = false;
 
       for (const sw of stateWatches) {
+        // Random jitter between requests to avoid looking like a bot
+        const jitter = 3000 + Math.random() * 7000;
+        log.info(`  Waiting ${Math.round(jitter / 1000)}s before fetching ${sw.state}…`);
+        await sleep(jitter);
         log.info(`  Fetching ${sw.state}…`);
         try {
           const { vehicles, pageState } = await collectInventory(page, {
@@ -144,7 +149,7 @@ export async function runOnce(config) {
       });
     }
   } finally {
-    try { browser.disconnect(); } catch {}
+    try { await browser.close(); } catch {}
   }
 
   return results;

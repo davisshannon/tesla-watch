@@ -177,11 +177,11 @@ cmd_status() {
     error   "Web server   not loaded"
   fi
 
-  # Chrome
-  if pgrep -f "remote-debugging-port=9222" &>/dev/null; then
-    success "Chrome       running (CDP on 9222)"
+  # Chrome (launched per-run by puppeteer, not persistent)
+  if pgrep -f "Google Chrome" &>/dev/null; then
+    success "Chrome       running"
   else
-    warn    "Chrome       not running (will launch on next check)"
+    info    "Chrome       not running (launched automatically each check)"
   fi
 
   # DB
