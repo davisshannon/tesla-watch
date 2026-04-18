@@ -31,8 +31,13 @@ export async function warmUpBrowser(page) {
 }
 
 export async function ensureChrome() {
-  // Ensure the user data dir exists but keep cookies/session intact between runs
   await mkdir(CHROME_USER_DATA, { recursive: true });
+  // Kill any leftover Chrome using our profile so puppeteer can launch fresh
+  const { execSync } = await import("child_process");
+  try {
+    execSync(`pkill -f "chrome-tesla-automation" 2>/dev/null || true`, { shell: true });
+    await sleep(1500);
+  } catch {}
 }
 
 export async function connectChrome() {
