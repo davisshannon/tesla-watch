@@ -708,10 +708,7 @@ async function loadMap() {
 }
 
 async function loadStockChart(wList) {
-  const history = await apiFetch("/api/history/stock?days=30");
-  const byWatch = {};
-  for (const row of history) { if (!byWatch[row.watch_id]) byWatch[row.watch_id] = {}; byWatch[row.watch_id][row.date] = row; }
-  const dates = [...new Set(history.map(r => r.date))].sort();
+  const rows = await apiFetch("/api/history/restock?days=30");
   const controls = document.getElementById("chartControls");
   controls.innerHTML = "";
   if (activeChartWatchIds.size === 0) wList.forEach(w => activeChartWatchIds.add(w.id));
@@ -723,21 +720,60 @@ async function loadStockChart(wList) {
     controls.appendChild(chip);
   });
   const COLORS = ["#e82127","#3b82f6","#2db85e","#f59e0b","#a855f7","#ec4899"];
+  // Build unique sorted dates for X axis labels
+  const allDates = [...new Set(rows.map(r => r.date))].sort();
   const datasets = wList.filter(w => activeChartWatchIds.has(w.id)).map((w, i) => ({
     label: w.label,
-    data: dates.map(d => byWatch[w.id]?.[d]?.max_count ?? null),
-    borderColor: COLORS[i % COLORS.length], backgroundColor: COLORS[i % COLORS.length] + "22",
-    tension: 0.3, fill: false, spanGaps: true,
+    data: rows.filter(r => r.watch_id === w.id).map(r => ({
+      x: r.date,
+      y: r.minutes_of_day,
+      added: r.added,
+      time_of_day: r.time_of_day,
+    })),
+    backgroundColor: COLORS[i % COLORS.length] + "cc",
+    borderColor: COLORS[i % COLORS.length],
+    borderWidth: 1,
+    pointRadius: ctx => Math.max(4, Math.min(18, (ctx.raw?.added ?? 1) * 3)),
+    pointHoverRadius: ctx => Math.max(6, Math.min(22, (ctx.raw?.added ?? 1) * 3 + 2)),
   }));
   if (stockChart) stockChart.destroy();
   stockChart = new Chart(document.getElementById("stockChart"), {
-    type: "line", data: { labels: dates, datasets },
+    type: "scatter",
+    data: { datasets },
     options: {
-      responsive: true, interaction: { mode: "index", intersect: false },
-      plugins: { legend: { labels: { color: "#aaa", boxWidth: 14 } } },
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: "#aaa", boxWidth: 14 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const d = ctx.raw;
+              return `${ctx.dataset.label} — ${d.x} ${d.time_of_day} · +${d.added} added`;
+            },
+          },
+        },
+      },
       scales: {
-        x: { ticks: { color: "#888", maxTicksLimit: 15 }, grid: { color: "#1e1e1e" } },
-        y: { ticks: { color: "#888" }, grid: { color: "#1e1e1e" }, beginAtZero: true },
+        x: {
+          type: "category",
+          labels: allDates,
+          ticks: { color: "#888", maxTicksLimit: 15 },
+          grid: { color: "#1e1e1e" },
+        },
+        y: {
+          min: 0, max: 1439,
+          ticks: {
+            color: "#888",
+            stepSize: 120,
+            callback: v => {
+              const h = Math.floor(v / 60).toString().padStart(2, "0");
+              const m = (v % 60).toString().padStart(2, "0");
+              return `${h}:${m}`;
+            },
+          },
+          grid: { color: "#1e1e1e" },
+          title: { display: true, text: "Time of day", color: "#666" },
+        },
       },
     },
   });

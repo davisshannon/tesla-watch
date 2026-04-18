@@ -11,6 +11,7 @@ import {
   queryEvents,
   queryRuns,
   queryStockHistory,
+  queryRestockScatter,
   queryAllWatches,
   queryCurrentStatus,
   queryDistinctStates,
@@ -220,6 +221,13 @@ export async function startServer(config, configPath = "./tesla-watch.config.jso
       const watchId = req.query.watch_id != null ? Number(req.query.watch_id) : undefined;
       const days = Math.min(Number(req.query.days ?? 30), 365);
       res.json(queryStockHistory(db, { watchId, days }));
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get("/api/history/restock", (req, res) => {
+    try {
+      const days = Math.min(Number(req.query.days ?? 30), 365);
+      res.json(queryRestockScatter(db, { days }));
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 

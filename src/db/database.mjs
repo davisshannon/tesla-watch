@@ -303,6 +303,27 @@ export function queryStockHistory(db, { watchId, days = 30 } = {}) {
   `).all(...params);
 }
 
+export function queryRestockScatter(db, { days = 30 } = {}) {
+  const offsetMins = -new Date().getTimezoneOffset();
+  const offsetStr = (offsetMins >= 0 ? "+" : "-") +
+    String(Math.floor(Math.abs(offsetMins) / 60)).padStart(2, "0") + ":" +
+    String(Math.abs(offsetMins) % 60).padStart(2, "0");
+  return db.prepare(`
+    SELECT
+      date(ran_at, '${offsetStr}') as date,
+      strftime('%H:%M', ran_at, '${offsetStr}') as time_of_day,
+      CAST(strftime('%H', ran_at, '${offsetStr}') AS INTEGER) * 60 +
+        CAST(strftime('%M', ran_at, '${offsetStr}') AS INTEGER) as minutes_of_day,
+      watch_id,
+      added,
+      vehicle_count
+    FROM runs
+    WHERE added > 0
+      AND ran_at >= datetime('now', '-${days} days')
+    ORDER BY ran_at ASC
+  `).all();
+}
+
 export function queryAllWatches(db) {
   return db.prepare("SELECT * FROM watches ORDER BY id").all();
 }
