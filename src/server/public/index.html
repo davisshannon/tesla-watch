@@ -494,11 +494,14 @@ async function loadOverview() {
     sel.appendChild(o);
   });
 
+  const MODEL_IMG = { my: "model-y.png", m3: "model-3.png" };
   const grid = document.getElementById("statusGrid");
   grid.innerHTML = status.map(w => {
     const hasStock = w.active_count > 0;
     const dotClass = !w.last_status ? "dot-unknown" : (w.last_status === "inventory" || w.last_status === "no-stock") ? "dot-ok" : "dot-error";
+    const img = MODEL_IMG[w.model] ? `<img src="${MODEL_IMG[w.model]}" style="width:120px;height:60px;object-fit:contain;margin-bottom:6px;opacity:0.9">` : "";
     return `<div class="status-card">
+      ${img}
       <div class="watch-name">${w.label}</div>
       <div class="count ${hasStock ? "has-stock" : "no-stock"}">${w.active_count}</div>
       <div class="meta"><span class="status-dot ${dotClass}"></span>${w.last_status || "never run"} · ${fmt(w.last_run)}</div>
@@ -762,9 +765,11 @@ async function loadStockChart(wList) {
         },
         y: {
           min: 0, max: 1439,
+          afterBuildTicks: axis => {
+            axis.ticks = [0,120,240,360,480,600,720,840,960,1080,1200,1320].map(v => ({ value: v }));
+          },
           ticks: {
             color: "#888",
-            stepSize: 120,
             callback: v => {
               const h = Math.floor(v / 60).toString().padStart(2, "0");
               const m = (v % 60).toString().padStart(2, "0");
