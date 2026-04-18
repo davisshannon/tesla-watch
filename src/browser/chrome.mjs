@@ -1,55 +1,47 @@
-import puppeteer from "puppeteer-core";
+import puppeteerExtra from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
 import { log } from "../utils/log.mjs";
 import { retry, sleep } from "../utils/retry.mjs";
-import { rm, mkdir } from "fs/promises";
-import { existsSync } from "fs";
+import { mkdir } from "fs/promises";
+
+puppeteerExtra.use(StealthPlugin());
 
 const CHROME_BINARY =
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 
 const CHROME_USER_DATA = `${process.env.HOME}/chrome-tesla-automation`;
 
-// Rotate through realistic macOS Chrome user agents to vary the fingerprint each run
-const USER_AGENTS = [
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15",
-];
-
-function randomUserAgent() {
-  return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-}
 
 let _browser = null;
 
-async function clearUserDataDir() {
-  try {
-    if (existsSync(CHROME_USER_DATA)) {
-      await rm(CHROME_USER_DATA, { recursive: true, force: true });
-    }
-    await mkdir(CHROME_USER_DATA, { recursive: true });
-    log.info("Cleared Chrome user data dir");
-  } catch (err) {
-    log.warn(`Could not clear user data dir: ${err.message}`);
-  }
+
+export async function warmUpBrowser(page) {
+  log.info("Warming up — visiting Tesla AU inventory page naturally");
+  // Browse homepage first, then navigate to inventory via the site — avoids locale selector
+  await page.goto("https://www.tesla.com/en_AU", { waitUntil: "domcontentloaded", timeout: 60000 });
+  await sleep(2000);
+  await acceptCookies(page);
+  // Now navigate to inventory naturally
+  await page.goto("https://www.tesla.com/en_AU/inventory/new/my", { waitUntil: "domcontentloaded", timeout: 60000 });
+  await sleep(3000);
+  await acceptCookies(page);
+  await confirmLocationModal(page, "https://www.tesla.com/en_AU/inventory/new/my");
+  await sleep(2000);
+  log.info("Warm-up complete — locale established");
 }
 
 export async function ensureChrome() {
-  // Always start fresh — clear stored fingerprint/cookies before each run
-  await clearUserDataDir();
+  // Ensure the user data dir exists but keep cookies/session intact between runs
+  await mkdir(CHROME_USER_DATA, { recursive: true });
 }
 
 export async function connectChrome() {
   return retry(
     async () => {
       log.info("Launching Chrome via puppeteer");
-      _browser = await puppeteer.launch({
+      _browser = await puppeteerExtra.launch({
         executablePath: CHROME_BINARY,
-        headless: true,
+        headless: false,
         userDataDir: CHROME_USER_DATA,
         args: [
           "--no-sandbox",
@@ -62,7 +54,7 @@ export async function connectChrome() {
         ],
         ignoreDefaultArgs: ["--enable-automation"],
       });
-      log.info("Chrome launched");
+      log.info("Chrome launched (non-headless, cookies persisted)");
       return _browser;
     },
     { attempts: 3, delayMs: 3000, label: "Chrome launch" }
@@ -73,16 +65,8 @@ export async function getPage(browser) {
   const pages = await browser.pages();
   const page = pages[0] || (await browser.newPage());
 
-  // Spoof user agent and hide webdriver fingerprints
-  const ua = randomUserAgent();
-  log.info(`User agent: ${ua}`);
-  await page.setUserAgent(ua);
-  await page.evaluateOnNewDocument(() => {
-    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-    Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
-    Object.defineProperty(navigator, "languages", { get: () => ["en-AU", "en"] });
-    window.chrome = { runtime: {} };
-  });
+  // Don't override UA — let Chrome send its real version so sec-ch-ua headers match
+  await page.setExtraHTTPHeaders({ "Accept-Language": "en-AU,en;q=0.9" });
 
   return page;
 }
@@ -114,31 +98,60 @@ export async function detectPageState(page) {
 }
 
 export async function navigateToInventory(page, inventoryUrl, opts = {}) {
-  const { localeBaseUrl = null, waitMs = 8000 } = opts;
-
-  if (localeBaseUrl) {
-    log.info(`Navigating to locale base: ${localeBaseUrl}`);
-    await page.goto(localeBaseUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await sleep(3000);
-
-    try {
-      await page.waitForSelector("text/Australia", { timeout: 4000 });
-      const el = await page.$("text/Australia");
-      if (el) {
-        await el.click();
-        log.info("Clicked Australia locale");
-        await sleep(4000);
-      }
-    } catch {
-      log.info("Locale selection page not shown, continuing");
-    }
-  }
+  const { waitMs = 8000 } = opts;
 
   log.info(`Navigating to inventory URL: ${inventoryUrl}`);
   await page.goto(inventoryUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await sleep(2000);
+  await confirmLocationModal(page, inventoryUrl);
+
   await sleep(waitMs);
 
   const state = await detectPageState(page);
   log.info(`Page state after navigation: ${state}`);
   return state;
+}
+
+async function acceptCookies(page) {
+  try {
+    const accepted = await page.evaluate(() => {
+      const btn = document.getElementById("tsla-accept-cookie");
+      if (btn) { btn.click(); return true; }
+      return false;
+    });
+    if (accepted) {
+      log.info("Accepted cookie banner");
+      await sleep(1000);
+    }
+  } catch (err) {
+    log.debug(`Cookie banner: ${err.message}`);
+  }
+}
+
+async function confirmLocationModal(page, inventoryUrl) {
+  try {
+    const confirmBtn = await page.$("button.tds-btn--width-full");
+    if (!confirmBtn) return;
+    const text = await page.evaluate(b => b.textContent.trim(), confirmBtn);
+    if (text !== "Confirm") return;
+
+    log.info("Clicking Confirm on location modal");
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}),
+      confirmBtn.click(),
+    ]);
+    await sleep(2000);
+
+    // Confirm navigates to the country selector — navigate directly to target URL
+    const isLocaleSelector = await page.evaluate(() =>
+      !!document.querySelector(".tds-locale-selector-superregion")
+    );
+    if (isLocaleSelector) {
+      log.info("Country selector shown — navigating directly to inventory URL");
+      await page.goto(inventoryUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await sleep(3000);
+    }
+  } catch (err) {
+    log.debug(`Location modal: ${err.message}`);
+  }
 }

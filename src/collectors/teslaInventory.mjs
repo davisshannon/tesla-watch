@@ -18,10 +18,7 @@ export async function collectInventory(page, config) {
   const { inventoryUrl, localeBaseUrl = null, waitMs = 8000 } = config;
 
   // Navigate (handles locale page too)
-  const pageState = await navigateToInventory(page, inventoryUrl, {
-    localeBaseUrl,
-    waitMs,
-  });
+  const pageState = await navigateToInventory(page, inventoryUrl, { waitMs });
 
   if (pageState === "blocked") {
     log.warn("Page appears blocked. Cannot collect inventory.");

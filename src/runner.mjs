@@ -1,4 +1,4 @@
-import { ensureChrome, connectChrome, getPage } from "./browser/chrome.mjs";
+import { ensureChrome, connectChrome, getPage, warmUpBrowser } from "./browser/chrome.mjs";
 import { sleep } from "./utils/retry.mjs";
 import { collectInventory } from "./collectors/teslaInventory.mjs";
 import { diffInventory } from "./state/diffInventory.mjs";
@@ -28,9 +28,10 @@ export async function runOnce(config) {
   const triggers = config.notify?.triggers ?? ["new_stock", "price_drop"];
   const filterConfig = config.notify?.filters ?? {};
 
-  await ensureChrome(config.chromeDebugUrl);
-  const browser = await connectChrome(config.chromeDebugUrl);
+  await ensureChrome();
+  const browser = await connectChrome();
   const page = await getPage(browser);
+  await warmUpBrowser(page);
 
   // Group watches by model so we diff all states together per model
   const byModel = {};
