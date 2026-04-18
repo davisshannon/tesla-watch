@@ -502,7 +502,7 @@ async function loadOverview() {
     const img = MODEL_IMG[w.model] ? `<img src="${MODEL_IMG[w.model]}" style="width:120px;height:60px;object-fit:contain;margin-bottom:6px;opacity:0.9">` : "";
     return `<div class="status-card">
       ${img}
-      <div class="watch-name">${w.label}</div>
+      <div class="watch-name">${overviewState ? w.label.replace(/\(All AU\)/, `(${overviewState})`) : w.label}</div>
       <div class="count ${hasStock ? "has-stock" : "no-stock"}">${w.active_count}</div>
       <div class="meta"><span class="status-dot ${dotClass}"></span>${w.last_status || "never run"} · ${fmt(w.last_run)}</div>
     </div>`;
