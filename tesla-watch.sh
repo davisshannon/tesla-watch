@@ -93,7 +93,7 @@ cmd_setup() {
     launchctl unload "$CHECKER_PLIST" 2>/dev/null || true
   fi
   launchctl load "$CHECKER_PLIST"
-  success "Checker loaded (runs every 5 min)"
+  success "Checker loaded (runs every 30 min)"
 
   if plist_loaded "$SERVER_LABEL"; then
     launchctl unload "$SERVER_PLIST" 2>/dev/null || true

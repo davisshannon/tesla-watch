@@ -14,9 +14,9 @@
         <string>__INSTALL_DIR__/tesla-watch.config.json</string>
     </array>
 
-    <!-- Run every 5 minutes -->
+    <!-- Run every 30 minutes -->
     <key>StartInterval</key>
-    <integer>300</integer>
+    <integer>1800</integer>
 
     <!-- Wake the Mac from idle sleep to run -->
     <key>WakeForJob</key>

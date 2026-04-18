@@ -84,7 +84,7 @@ http://localhost:3737
 
 ## How it works
 
-The **checker** (`cli.mjs run`) fires every 5 minutes via launchd:
+The **checker** (`cli.mjs run`) fires every 30 minutes via launchd:
 
 1. Launches Chrome in headless CDP mode if not already running
 2. For each model (MY, M3) × each AU state — navigates to the Tesla inventory page with `RegistrationProvince=<STATE>`
@@ -184,7 +184,7 @@ The Australia map shows coloured bubbles (red = Model Y, blue = Model 3) sized b
 
 ### `tesla-watch.plist` — inventory checker
 
-Runs `cli.mjs run` every 5 minutes (configurable in Settings → Scheduler). Wakes the Mac from sleep. Exits after each run.
+Runs `cli.mjs run` every 30 minutes (configurable in Settings → Scheduler). Wakes the Mac from sleep. Exits after each run.
 
 ### `tesla-watch-server.plist` — web server
 
