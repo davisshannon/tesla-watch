@@ -33,25 +33,34 @@ export async function collectInventory(page, config) {
     }
   };
 
-  page.on("response", onResponse);
   let pageState;
-  try {
-    pageState = await navigateToInventory(page, inventoryUrl, { waitMs });
-  } finally {
-    page.off("response", onResponse);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    apiVehicles = null;
+    page.on("response", onResponse);
+    try {
+      pageState = await navigateToInventory(page, inventoryUrl, { waitMs });
+    } finally {
+      page.off("response", onResponse);
+    }
+
+    if (pageState === "blocked") {
+      log.warn(`Akamai/CDN block detected on ${inventoryUrl} — skipping. Clear ~/chrome-tesla-automation to reset fingerprint.`);
+      return { vehicles: [], pageState };
+    }
+
+    // API fired — we have results regardless of page state
+    if (apiVehicles !== null) {
+      return { vehicles: apiVehicles, pageState: apiVehicles.length > 0 ? "inventory" : "no-stock" };
+    }
+
+    if (pageState !== "locale-select") break;
+
+    log.warn(`Locale selector on attempt ${attempt} and API did not fire — retrying`);
   }
 
-  if (pageState === "blocked") {
-    log.warn(`Akamai/CDN block detected on ${inventoryUrl} — skipping. Clear ~/chrome-tesla-automation to reset fingerprint.`);
-    return { vehicles: [], pageState };
-  }
   if (pageState === "locale-select") {
-    log.warn("Locale selection page still showing after navigation.");
+    log.warn("Locale selection page still showing after all attempts.");
     return { vehicles: [], pageState };
-  }
-
-  if (apiVehicles !== null) {
-    return { vehicles: apiVehicles, pageState: apiVehicles.length > 0 ? "inventory" : "no-stock" };
   }
 
   log.warn(`API did not fire. Final page state: ${pageState}`);
