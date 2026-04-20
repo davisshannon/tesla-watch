@@ -11,21 +11,25 @@ const CHROME_BINARY =
 
 const CHROME_USER_DATA = `${process.env.HOME}/chrome-tesla-automation`;
 
+const AU_LOCALE_COOKIES = [
+  { name: "tsla-locale", value: "en_AU", domain: ".tesla.com", path: "/" },
+  { name: "userCountry", value: "AU", domain: ".tesla.com", path: "/" },
+];
 
 let _browser = null;
 
+async function setLocaleCookies(page) {
+  await page.setCookie(...AU_LOCALE_COOKIES);
+}
 
 export async function warmUpBrowser(page) {
-  log.info("Warming up — visiting Tesla AU inventory page naturally");
-  // Browse homepage first, then navigate to inventory via the site — avoids locale selector
-  await page.goto("https://www.tesla.com/en_AU", { waitUntil: "domcontentloaded", timeout: 60000 });
-  await sleep(2000);
-  await acceptCookies(page);
-  // Now navigate to inventory naturally
+  log.info("Warming up — setting locale cookies and visiting inventory");
+  await setLocaleCookies(page);
   await page.goto("https://www.tesla.com/en_AU/inventory/new/my", { waitUntil: "domcontentloaded", timeout: 60000 });
   await sleep(3000);
   await acceptCookies(page);
-  await confirmLocationModal(page, "https://www.tesla.com/en_AU/inventory/new/my");
+  // If locale selector still appears, dismiss it
+  await handleLocaleSelector(page, "https://www.tesla.com/en_AU/inventory/new/my");
   await sleep(2000);
   log.info("Warm-up complete — locale established");
 }
@@ -110,10 +114,13 @@ export async function detectPageState(page) {
 export async function navigateToInventory(page, inventoryUrl, opts = {}) {
   const { waitMs = 8000 } = opts;
 
+  await setLocaleCookies(page);
   log.info(`Navigating to inventory URL: ${inventoryUrl}`);
   await page.goto(inventoryUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
   await sleep(2000);
-  await confirmLocationModal(page, inventoryUrl);
+
+  // If locale selector appears despite cookies, navigate directly back
+  await handleLocaleSelector(page, inventoryUrl);
 
   await sleep(waitMs);
 
@@ -138,46 +145,18 @@ async function acceptCookies(page) {
   }
 }
 
-async function confirmLocationModal(page, inventoryUrl) {
+async function handleLocaleSelector(page, inventoryUrl) {
   try {
-    const confirmBtn = await page.$("button.tds-btn--width-full");
-    if (!confirmBtn) return;
-    const text = await page.evaluate(b => b.textContent.trim(), confirmBtn);
-    if (text !== "Confirm") return;
-
-    log.info("Clicking Confirm on location modal");
-    await Promise.all([
-      page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}),
-      confirmBtn.click(),
-    ]);
-    await sleep(2000);
-
-    // Confirm navigates to the country selector — click Australia to set locale cookie
     const isLocaleSelector = await page.evaluate(() =>
       !!document.querySelector(".tds-locale-selector-superregion, .tds-locale-selector")
     );
-    if (isLocaleSelector) {
-      log.info("Country selector shown — clicking Australia to set locale");
-      const clicked = await page.evaluate(() => {
-        const links = Array.from(document.querySelectorAll("a[href*='en_AU'], a[href*='/en_AU']"));
-        if (links.length > 0) { links[0].click(); return true; }
-        // fallback: find by text
-        const all = Array.from(document.querySelectorAll("a"));
-        const au = all.find(a => /australia/i.test(a.textContent));
-        if (au) { au.click(); return true; }
-        return false;
-      });
-      if (clicked) {
-        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
-        await sleep(2000);
-        log.info("Australia selected — navigating to inventory URL");
-      } else {
-        log.warn("Could not find Australia link on locale selector — navigating directly");
-      }
-      await page.goto(inventoryUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-      await sleep(3000);
-    }
+    if (!isLocaleSelector) return;
+
+    log.info("Locale selector shown — setting cookies and navigating directly to inventory");
+    await page.setCookie(...AU_LOCALE_COOKIES);
+    await page.goto(inventoryUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await sleep(3000);
   } catch (err) {
-    log.debug(`Location modal: ${err.message}`);
+    log.debug(`Locale selector handler: ${err.message}`);
   }
 }
