@@ -23,23 +23,26 @@ async function setLocaleCookies(page) {
 }
 
 export async function warmUpBrowser(page) {
-  log.info("Warming up — establishing AU locale via country selector");
-  await setLocaleCookies(page);
-  await page.goto("https://www.tesla.com/en_AU", { waitUntil: "domcontentloaded", timeout: 60000 });
+  log.info("Warming up — navigating to tesla.com root to trigger country selector");
+  // Go to root (no locale) to force the country selector to appear
+  await page.goto("https://www.tesla.com", { waitUntil: "domcontentloaded", timeout: 60000 });
+  await sleep(3000);
+  await acceptCookies(page);
+
+  // Select Australia from the country selector
+  await selectAustralia(page);
   await sleep(2000);
   await acceptCookies(page);
 
-  const localeSelected = await selectAustralia(page);
-  if (localeSelected) {
-    await sleep(2000);
-    await acceptCookies(page);
-  }
-
-  // Navigate to inventory to finalise locale session
+  // Now navigate directly to inventory — locale session is established
+  log.info("Navigating to inventory to finalise locale");
   await page.goto("https://www.tesla.com/en_AU/inventory/new/my", { waitUntil: "domcontentloaded", timeout: 60000 });
-  await sleep(3000);
+  await sleep(4000);
   await acceptCookies(page);
-  log.info("Warm-up complete — locale established");
+  // Dismiss confirm modal if present, without clicking Confirm (which redirects to country selector)
+  await dismissConfirmModal(page);
+  await sleep(2000);
+  log.info(`Warm-up complete — locale established, at ${page.url()}`);
 }
 
 export async function ensureChrome() {
@@ -155,32 +158,64 @@ async function acceptCookies(page) {
 
 async function selectAustralia(page) {
   try {
+    // Wait up to 5s for the country selector to appear
+    await page.waitForSelector(".tds-locale-selector-superregion, .tds-locale-selector", { timeout: 5000 }).catch(() => {});
+
     const isLocaleSelector = await page.evaluate(() =>
       !!document.querySelector(".tds-locale-selector-superregion, .tds-locale-selector")
     );
-    if (!isLocaleSelector) return false;
+    if (!isLocaleSelector) {
+      log.info("No country selector present — skipping");
+      return false;
+    }
 
     log.info("Country selector shown — clicking Australia");
     // Find the exact link whose href ends with /en_AU (not /en_AU/something)
-    const clicked = await page.evaluate(() => {
+    const href = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll("a[href]"));
       const au = links.find(a => /\/en_AU\/?$/.test(a.getAttribute("href")));
-      if (au) { au.click(); return true; }
-      return false;
+      return au ? au.getAttribute("href") : null;
     });
 
-    if (clicked) {
-      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+    if (href) {
+      log.info(`Found Australia link: ${href}`);
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}),
+        page.click(`a[href="${href}"]`),
+      ]);
       await sleep(1500);
       log.info(`Australia selected — now at ${page.url()}`);
       return true;
     }
 
-    log.warn("Could not find Australia link on country selector");
+    log.warn("Could not find Australia link — dumping all hrefs for debugging");
+    const hrefs = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("a[href]")).map(a => a.getAttribute("href")).slice(0, 30)
+    );
+    log.warn(hrefs.join(", "));
     return false;
   } catch (err) {
     log.debug(`selectAustralia: ${err.message}`);
     return false;
+  }
+}
+
+async function dismissConfirmModal(page) {
+  try {
+    // If the "Confirm" modal is shown, close it with the X/dismiss button rather than Confirm
+    // (clicking Confirm redirects to the country selector)
+    const dismissed = await page.evaluate(() => {
+      // Try close/dismiss button first
+      const close = document.querySelector("button[aria-label='Close'], button.tds-modal-close, button[data-id='modal-close']");
+      if (close) { close.click(); return "close-btn"; }
+      // Press Escape to dismiss
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      return "escape";
+    });
+    log.info(`Confirm modal dismissed via: ${dismissed}`);
+    await sleep(500);
+  } catch (err) {
+    log.debug(`dismissConfirmModal: ${err.message}`);
   }
 }
 
