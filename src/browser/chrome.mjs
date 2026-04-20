@@ -125,13 +125,19 @@ export async function detectPageState(page) {
 export async function navigateToInventory(page, inventoryUrl, opts = {}) {
   const { waitMs = 8000 } = opts;
 
+  // Strip query params — they trigger the country selector. The inventory API
+  // fires regardless and returns all vehicles; params only affect sort/range UI.
+  const parsed = new URL(inventoryUrl);
+  const cleanUrl = `${parsed.origin}${parsed.pathname}`;
+
   for (let attempt = 1; attempt <= 3; attempt++) {
     await setLocaleCookies(page);
-    log.info(`Navigating to inventory URL: ${inventoryUrl} (attempt ${attempt})`);
-    await page.goto(inventoryUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+    log.info(`Navigating to inventory URL: ${cleanUrl} (attempt ${attempt})`);
+    await page.goto(cleanUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
     await sleep(2000);
 
-    await handleLocaleSelector(page, inventoryUrl);
+    await handleLocaleSelector(page, cleanUrl);
+    await dismissConfirmModal(page);
     await sleep(waitMs);
 
     const state = await detectPageState(page);
