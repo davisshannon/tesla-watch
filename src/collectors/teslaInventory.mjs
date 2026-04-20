@@ -1,118 +1,75 @@
-import { navigateToInventory } from "../browser/chrome.mjs";
 import { normalizeVehicle } from "../parsers/normalizeVehicle.mjs";
 import { log } from "../utils/log.mjs";
 import { sleep } from "../utils/retry.mjs";
 
+const API_BASE = "https://www.tesla.com/inventory/api/v4/inventory-results";
 const PAGE_SIZE = 24;
 
 export async function collectInventory(page, config) {
-  const { inventoryUrl, waitMs = 8000 } = config;
+  const { inventoryUrl } = config;
 
-  let apiVehicles = null;
-  let apiUrl = null;
-  let totalMatches = null;
+  // Extract model from inventory URL path e.g. /en_AU/inventory/new/my -> "my"
+  const model = new URL(inventoryUrl).pathname.split("/").pop();
 
-  const onResponse = async (response) => {
-    try {
-      const url = response.url();
-      if (!url.includes("/inventory/api/")) return;
-      if (response.status() < 200 || response.status() >= 300) return;
+  log.info(`Fetching inventory for ${model} via API (no page navigation)`);
 
-      const text = await response.text();
-      const json = JSON.parse(text);
-
-      const total = json?.total_matches_found ?? null;
-      const results = json?.results ?? json?.data ?? json?.response?.results ?? json?.response?.data ?? null;
-
-      if (total !== null) {
-        log.info(`Inventory API: ${total} total matches`);
-        totalMatches = total;
-        apiUrl = url;
-      }
-
-      if (Array.isArray(results) && results.length > 0) {
-        apiVehicles = results.map(normalizeVehicle);
-        log.info(`Intercepted API response: ${apiVehicles.length} vehicles`);
-      } else if (total === 0 || results === null) {
-        apiVehicles = [];
-        log.info("Inventory API confirmed: no stock");
-      }
-    } catch (err) {
-      log.debug(`Response handler error: ${err.message}`);
-    }
-  };
-
-  let pageState;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    apiVehicles = null;
-    apiUrl = null;
-    totalMatches = null;
-    page.on("response", onResponse);
-    try {
-      pageState = await navigateToInventory(page, inventoryUrl, { waitMs });
-    } finally {
-      page.off("response", onResponse);
-    }
-
-    if (pageState === "blocked") {
-      log.warn(`Akamai/CDN block detected on ${inventoryUrl} — skipping. Clear ~/chrome-tesla-automation to reset fingerprint.`);
-      return { vehicles: [], pageState };
-    }
-
-    if (apiVehicles !== null) break;
-    if (pageState !== "locale-select") break;
-
-    log.warn(`Locale selector on attempt ${attempt} and API did not fire — retrying`);
+  try {
+    const { vehicles, total } = await fetchAllPages(page, model);
+    log.info(`${model}: ${vehicles.length} of ${total} vehicles fetched`);
+    return { vehicles, pageState: vehicles.length > 0 ? "inventory" : "no-stock" };
+  } catch (err) {
+    log.warn(`${model} API fetch failed: ${err.message}`);
+    return { vehicles: [], pageState: "error" };
   }
-
-  if (pageState === "locale-select") {
-    log.warn("Locale selection page still showing after all attempts.");
-    return { vehicles: [], pageState };
-  }
-
-  if (apiVehicles === null) {
-    log.warn(`API did not fire. Final page state: ${pageState}`);
-    return { vehicles: [], pageState };
-  }
-
-  // Fetch remaining pages if total exceeds first page
-  if (apiUrl && totalMatches !== null && totalMatches > apiVehicles.length) {
-    const remaining = totalMatches - apiVehicles.length;
-    const extraPages = Math.ceil(remaining / PAGE_SIZE);
-    log.info(`Fetching ${extraPages} more page(s) (${totalMatches} total vehicles)`);
-
-    for (let i = 1; i <= extraPages; i++) {
-      const offset = i * PAGE_SIZE;
-      await sleep(1500 + Math.random() * 1500);
-      try {
-        const extra = await fetchPage(page, apiUrl, offset);
-        if (extra.length === 0) break;
-        apiVehicles.push(...extra);
-        log.info(`Page ${i + 1}: +${extra.length} vehicles (${apiVehicles.length} total)`);
-      } catch (err) {
-        log.warn(`Pagination page ${i + 1} failed: ${err.message}`);
-        break;
-      }
-    }
-  }
-
-  return { vehicles: apiVehicles, pageState: apiVehicles.length > 0 ? "inventory" : "no-stock" };
 }
 
-async function fetchPage(page, apiUrl, offset) {
-  // Parse the query param, update offset, fetch via browser's session
-  const url = new URL(apiUrl);
-  const queryJson = JSON.parse(decodeURIComponent(url.searchParams.get("query")));
-  queryJson.offset = offset;
-  url.searchParams.set("query", JSON.stringify(queryJson));
-  const fetchUrl = url.toString();
+async function fetchAllPages(page, model) {
+  const allVehicles = [];
+  let offset = 0;
+  let total = null;
 
-  const result = await page.evaluate(async (u) => {
-    const res = await fetch(u, { credentials: "include" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  }, fetchUrl);
+  do {
+    if (offset > 0) await sleep(1500 + Math.random() * 1500);
 
-  const results = result?.results ?? result?.data ?? result?.response?.results ?? result?.response?.data ?? null;
-  return Array.isArray(results) ? results.map(normalizeVehicle) : [];
+    const query = {
+      query: {
+        model,
+        condition: "new",
+        options: {},
+        arrangeby: "Price",
+        order: "asc",
+        market: "AU",
+        language: "en",
+        super_region: "north america",
+      },
+      offset,
+      count: PAGE_SIZE,
+      outsideOffset: 0,
+      outsideSearch: false,
+      isFalconDeliverySelectionEnabled: true,
+      version: "v2",
+    };
+
+    const url = `${API_BASE}?query=${encodeURIComponent(JSON.stringify(query))}`;
+
+    const json = await page.evaluate(async (u) => {
+      const res = await fetch(u, { credentials: "include" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }, url);
+
+    if (total === null) {
+      total = json?.total_matches_found ?? 0;
+      log.info(`Inventory API: ${total} total matches`);
+    }
+
+    const results = json?.results ?? json?.data ?? json?.response?.results ?? json?.response?.data ?? null;
+    if (!Array.isArray(results) || results.length === 0) break;
+
+    allVehicles.push(...results.map(normalizeVehicle));
+    log.info(`Fetched offset ${offset}: +${results.length} vehicles (${allVehicles.length} total)`);
+    offset += PAGE_SIZE;
+  } while (allVehicles.length < total);
+
+  return { vehicles: allVehicles, total: total ?? 0 };
 }

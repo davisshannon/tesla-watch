@@ -53,7 +53,7 @@ export async function runOnce(config) {
         log.error(`${watch.label} collect failed: ${err.message}`);
       }
 
-      if (pageState === "blocked" || pageState === "locale-select" || pageState === "error") {
+      if (pageState === "blocked" || pageState === "error") {
         log.warn(`${watch.label}: skipping diff — ${pageState}`);
         if (pageState === "blocked" && config.notify?.notifyOnBlock) {
           await notifier.send({ title: `Tesla Watch blocked (${watch.label})`, body: "Akamai is denying access. Delete ~/chrome-tesla-automation to reset." });
