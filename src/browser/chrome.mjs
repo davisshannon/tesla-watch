@@ -84,7 +84,7 @@ export async function detectPageState(page) {
     if (/choose your region|select your country/i.test(bodyText)) {
       return "locale-select";
     }
-    if (/access denied|blocked|403|captcha|unusual traffic|bot/i.test(bodyText)) {
+    if (/access denied|blocked|403|captcha|unusual traffic|bot/i.test(bodyText) || /reference #[\d.]+/i.test(bodyText)) {
       return "blocked";
     }
     if (/no inventory|no vehicles|no results found|0 results/i.test(bodyText)) {

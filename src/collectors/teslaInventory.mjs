@@ -21,7 +21,7 @@ export async function collectInventory(page, config) {
   const pageState = await navigateToInventory(page, inventoryUrl, { waitMs });
 
   if (pageState === "blocked") {
-    log.warn("Page appears blocked. Cannot collect inventory.");
+    log.warn(`Akamai/CDN block detected on ${inventoryUrl} — skipping. Clear ~/chrome-tesla-automation to reset fingerprint.`);
     return { vehicles: [], pageState };
   }
   if (pageState === "locale-select") {
