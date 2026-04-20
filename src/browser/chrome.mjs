@@ -173,7 +173,7 @@ async function selectAustralia(page) {
     // Find the exact link whose href ends with /en_AU (not /en_AU/something)
     const href = await page.evaluate(() => {
       const links = Array.from(document.querySelectorAll("a[href]"));
-      const au = links.find(a => /\/en_AU\/?$/.test(a.getAttribute("href")));
+      const au = links.find(a => /\/en_au\/?$/i.test(a.getAttribute("href")));
       return au ? au.getAttribute("href") : null;
     });
 
@@ -181,7 +181,7 @@ async function selectAustralia(page) {
       log.info(`Found Australia link: ${href}`);
       await Promise.all([
         page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {}),
-        page.click(`a[href="${href}"]`),
+        page.evaluate(h => document.querySelector(`a[href="${h}"]`)?.click(), href),
       ]);
       await sleep(1500);
       log.info(`Australia selected — now at ${page.url()}`);
