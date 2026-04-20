@@ -303,25 +303,50 @@ export function queryStockHistory(db, { watchId, days = 30 } = {}) {
   `).all(...params);
 }
 
-export function queryRestockScatter(db, { days = 30 } = {}) {
+export function queryRestockScatter(db, { days = 30, state } = {}) {
   const offsetMins = -new Date().getTimezoneOffset();
   const offsetStr = (offsetMins >= 0 ? "+" : "-") +
     String(Math.floor(Math.abs(offsetMins) / 60)).padStart(2, "0") + ":" +
     String(Math.abs(offsetMins) % 60).padStart(2, "0");
+
+  if (!state) {
+    return db.prepare(`
+      SELECT
+        date(ran_at, '${offsetStr}') as date,
+        strftime('%H:%M', ran_at, '${offsetStr}') as time_of_day,
+        CAST(strftime('%H', ran_at, '${offsetStr}') AS INTEGER) * 60 +
+          CAST(strftime('%M', ran_at, '${offsetStr}') AS INTEGER) as minutes_of_day,
+        watch_id,
+        added,
+        vehicle_count
+      FROM runs
+      WHERE added > 0
+        AND ran_at >= datetime('now', '-${days} days')
+      ORDER BY ran_at ASC
+    `).all();
+  }
+
+  // State-filtered: count added events where vehicle location matches
   return db.prepare(`
     SELECT
-      date(ran_at, '${offsetStr}') as date,
-      strftime('%H:%M', ran_at, '${offsetStr}') as time_of_day,
-      CAST(strftime('%H', ran_at, '${offsetStr}') AS INTEGER) * 60 +
-        CAST(strftime('%M', ran_at, '${offsetStr}') AS INTEGER) as minutes_of_day,
-      watch_id,
-      added,
-      vehicle_count
-    FROM runs
-    WHERE added > 0
-      AND ran_at >= datetime('now', '-${days} days')
-    ORDER BY ran_at ASC
-  `).all();
+      date(r.ran_at, '${offsetStr}') as date,
+      strftime('%H:%M', r.ran_at, '${offsetStr}') as time_of_day,
+      CAST(strftime('%H', r.ran_at, '${offsetStr}') AS INTEGER) * 60 +
+        CAST(strftime('%M', r.ran_at, '${offsetStr}') AS INTEGER) as minutes_of_day,
+      r.watch_id,
+      COUNT(e.id) as added,
+      r.vehicle_count
+    FROM runs r
+    JOIN events e ON e.watch_id = r.watch_id
+      AND date(e.occurred_at) = date(r.ran_at)
+      AND strftime('%H:%M', e.occurred_at) = strftime('%H:%M', r.ran_at)
+      AND e.event_type = 'added'
+    JOIN vehicles v ON v.id = e.vehicle_id AND v.location = ?
+    WHERE r.ran_at >= datetime('now', '-${days} days')
+    GROUP BY date(r.ran_at, '${offsetStr}'), r.watch_id, strftime('%H:%M', r.ran_at)
+    HAVING added > 0
+    ORDER BY r.ran_at ASC
+  `).all(state);
 }
 
 export function queryAllWatches(db) {

@@ -176,7 +176,12 @@
 
     <div class="chart-section">
       <h2>Stock levels — last 30 days</h2>
-      <div class="chart-controls" id="chartControls"></div>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+        <div class="chart-controls" id="chartControls"></div>
+        <select id="chartStateFilter" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:0.82rem">
+          <option value="">All states</option>
+        </select>
+      </div>
       <canvas id="stockChart"></canvas>
     </div>
   </div>
@@ -376,6 +381,7 @@
 <script>
 const FBT_THRESHOLD = 91387;
 let watches = [];
+let allStates = [];
 let stockChart = null;
 let activeChartWatchIds = new Set();
 let vehiclePage = 0;
@@ -477,18 +483,19 @@ let overviewState = "";
 
 async function loadOverview() {
   const stateParam = overviewState ? `?state=${overviewState}` : "";
-  const [status, wList, allStates] = await Promise.all([
+  const [status, wList, fetchedStates] = await Promise.all([
     apiFetch("/api/status" + stateParam),
     apiFetch("/api/watches"),
     apiFetch("/api/states"),
   ]);
   watches = wList;
+  allStates = fetchedStates;
 
   // Populate state dropdown
   const sel = document.getElementById("overviewStateFilter");
   const prev = sel.value;
   sel.innerHTML = `<option value="">All states</option>`;
-  allStates.forEach(s => {
+  fetchedStates.forEach(s => {
     const o = document.createElement("option");
     o.value = s; o.textContent = s;
     if (s === prev) o.selected = true;
@@ -516,6 +523,8 @@ document.getElementById("overviewStateFilter").addEventListener("change", e => {
   overviewState = e.target.value;
   loadOverview();
 });
+
+document.getElementById("chartStateFilter").addEventListener("change", () => loadStockChart(watches));
 
 // ── Australia Map ─────────────────────────────────────────────────────────────
 
@@ -712,7 +721,18 @@ async function loadMap() {
 }
 
 async function loadStockChart(wList) {
-  const rows = await apiFetch("/api/history/restock?days=30");
+  const chartState = document.getElementById("chartStateFilter").value;
+  const params = new URLSearchParams({ days: 30 });
+  if (chartState) params.set("state", chartState);
+  const rows = await apiFetch("/api/history/restock?" + params);
+
+  // Populate state dropdown once
+  const sel = document.getElementById("chartStateFilter");
+  if (sel.options.length === 1) {
+    allStates.forEach(s => { const o = document.createElement("option"); o.value = s; o.textContent = s; sel.appendChild(o); });
+  }
+  sel.value = chartState;
+
   const controls = document.getElementById("chartControls");
   controls.innerHTML = "";
   if (activeChartWatchIds.size === 0) wList.forEach(w => activeChartWatchIds.add(w.id));

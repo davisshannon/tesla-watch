@@ -227,7 +227,8 @@ export async function startServer(config, configPath = "./tesla-watch.config.jso
   app.get("/api/history/restock", (req, res) => {
     try {
       const days = Math.min(Number(req.query.days ?? 30), 365);
-      res.json(queryRestockScatter(db, { days }));
+      const state = req.query.state || undefined;
+      res.json(queryRestockScatter(db, { days, state }));
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
