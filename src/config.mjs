@@ -3,19 +3,11 @@ import path from "path";
 
 export const AU_STATES = ["VIC", "NSW", "QLD", "WA", "SA", "TAS", "ACT", "NT"];
 
-// One watch entry per model × state
 function buildDefaultWatches() {
-  const models = [
-    { model: "my", label: "Model Y" },
-    { model: "m3", label: "Model 3" },
+  return [
+    { model: "my", label: "Model Y (All AU)", market: "en_AU" },
+    { model: "m3", label: "Model 3 (All AU)", market: "en_AU" },
   ];
-  const watches = [];
-  for (const { model, label } of models) {
-    for (const state of AU_STATES) {
-      watches.push({ model, category: "", label: `${label} (${state})`, market: "en_AU", state });
-    }
-  }
-  return watches;
 }
 
 const DEFAULTS = {
@@ -58,7 +50,6 @@ export async function loadConfig(configPath = "./tesla-watch.config.json") {
 
   const merged = deepMerge(DEFAULTS, fileConfig);
 
-  // Build per-watch URLs with RegistrationProvince per state
   merged.watches = merged.watches.map((w) => ({
     ...w,
     inventoryUrl: buildInventoryUrl(w, merged.sort),
@@ -72,7 +63,6 @@ export function buildInventoryUrl(watch, sort = "plh") {
   const base = `https://www.tesla.com/${watch.market}/inventory/new/${watch.model}`;
   const params = new URLSearchParams({ arrangeby: sort });
   if (watch.category) params.set("CATEGORY", watch.category);
-  if (watch.state) params.set("RegistrationProvince", watch.state);
   params.set("range", "0");
   return `${base}?${params}`;
 }

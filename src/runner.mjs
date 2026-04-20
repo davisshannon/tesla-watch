@@ -1,5 +1,4 @@
 import { ensureChrome, connectChrome, getPage, warmUpBrowser } from "./browser/chrome.mjs";
-import { sleep } from "./utils/retry.mjs";
 import { collectInventory } from "./collectors/teslaInventory.mjs";
 import { diffInventory } from "./state/diffInventory.mjs";
 import { buildNotifier } from "./notify/notifier.mjs";
@@ -16,11 +15,6 @@ import {
   recordRun,
 } from "./db/database.mjs";
 
-/**
- * Run one full check cycle across all configured watches.
- * Watches are grouped by model — each state is fetched separately but
- * diffed and notified as a single model unit.
- */
 export async function runOnce(config) {
   const db = await openDb(config.dbFile);
   const notifier = buildNotifier(config.notify);
@@ -33,67 +27,36 @@ export async function runOnce(config) {
   const page = await getPage(browser);
   await warmUpBrowser(page);
 
-  // Group watches by model so we diff all states together per model
-  const byModel = {};
-  for (const watch of config.watches) {
-    const key = `${watch.model}|${watch.category ?? ""}`;
-    if (!byModel[key]) byModel[key] = { watch, stateWatches: [] };
-    byModel[key].stateWatches.push(watch);
-  }
-
   const results = [];
 
   try {
-    for (const { watch: modelWatch, stateWatches } of Object.values(byModel)) {
-      const modelLabel = `${modelWatch.model.toUpperCase()} (All AU)`;
-      log.info(`--- Watch: ${modelLabel} ---`);
+    for (const watch of config.watches) {
+      log.info(`--- Watch: ${watch.label} ---`);
 
-      // Use model-level watch entry in DB (no state key) for state tracking
-      const watchKey = { model: modelWatch.model, category: modelWatch.category ?? "", label: modelLabel, market: modelWatch.market ?? "en_AU" };
+      const watchKey = { model: watch.model, category: watch.category ?? "", label: watch.label, market: watch.market ?? "en_AU" };
       const watchId = upsertWatch(db, watchKey);
       const seenIds = getSeenIds(db, watchId);
 
-      // Collect from each state, merge results deduplicating by vehicleId
-      const vehicleMap = {};
-      let anyInventory = false;
-      let anyError = false;
+      let vehicles = [];
+      let pageState = "error";
 
-      for (const sw of stateWatches) {
-        // Random jitter between requests to avoid looking like a bot
-        const jitter = 3000 + Math.random() * 7000;
-        log.info(`  Waiting ${Math.round(jitter / 1000)}s before fetching ${sw.state}…`);
-        await sleep(jitter);
-        log.info(`  Fetching ${sw.state}…`);
-        try {
-          const { vehicles, pageState } = await collectInventory(page, {
-            inventoryUrl: sw.inventoryUrl,
-            localeBaseUrl: sw.localeBaseUrl,
-            waitMs: config.waitMs,
-          });
-          if (pageState === "inventory" || pageState === "no-stock") anyInventory = true;
-          if (pageState === "blocked" || pageState === "locale-select") {
-            log.warn(`  ${sw.state}: ${pageState}`);
-            continue;
-          }
-          for (const v of vehicles) {
-            const id = vehicleId(v);
-            vehicleMap[id] = v;
-          }
-          log.info(`  ${sw.state}: ${vehicles.length} vehicles`);
-        } catch (err) {
-          log.error(`  ${sw.state} collect failed: ${err.message}`);
-          anyError = true;
-        }
+      try {
+        const result = await collectInventory(page, {
+          inventoryUrl: watch.inventoryUrl,
+          localeBaseUrl: watch.localeBaseUrl,
+          waitMs: config.waitMs,
+        });
+        vehicles = result.vehicles;
+        pageState = result.pageState;
+        log.info(`${watch.label}: ${vehicles.length} vehicles (${pageState})`);
+      } catch (err) {
+        log.error(`${watch.label} collect failed: ${err.message}`);
       }
 
-      const vehicles = Object.values(vehicleMap);
-      const pageState = anyError && !anyInventory ? "error" : vehicles.length > 0 ? "inventory" : "no-stock";
-
-      log.info(`${modelLabel} total: ${vehicles.length} vehicles`);
-
-      if (pageState === "error") {
+      if (pageState === "blocked" || pageState === "locale-select" || pageState === "error") {
+        log.warn(`${watch.label}: skipping diff — ${pageState}`);
         recordRun(db, watchId, { status: pageState, vehicleCount: 0, added: 0, removed: 0, updated: 0 });
-        results.push({ watch: modelLabel, status: pageState, vehicles: 0, added: 0, removed: 0, updated: 0 });
+        results.push({ watch: watch.label, status: pageState, vehicles: 0, added: 0, removed: 0, updated: 0 });
         continue;
       }
 
@@ -114,8 +77,8 @@ export async function runOnce(config) {
       if (notifyAdded.length > 0) {
         const itemLines = notifyAdded.map((v) => summarize(v, fbt));
         await notifier.send({
-          title: `New Tesla stock (${modelLabel}): ${notifyAdded.length} vehicle${notifyAdded.length > 1 ? "s" : ""}`,
-          body: stateWatches[0].inventoryUrl,
+          title: `New Tesla stock (${watch.label}): ${notifyAdded.length} vehicle${notifyAdded.length > 1 ? "s" : ""}`,
+          body: watch.inventoryUrl,
           items: itemLines,
         });
       }
@@ -126,8 +89,8 @@ export async function runOnce(config) {
             `${summarize(vehicle, fbt)} [was $${Number(priorPrice).toLocaleString()}]`
         );
         await notifier.send({
-          title: `Tesla price change (${modelLabel}): ${notifyUpdated.length} vehicle${notifyUpdated.length > 1 ? "s" : ""}`,
-          body: stateWatches[0].inventoryUrl,
+          title: `Tesla price change (${watch.label}): ${notifyUpdated.length} vehicle${notifyUpdated.length > 1 ? "s" : ""}`,
+          body: watch.inventoryUrl,
           items: itemLines,
         });
       }
@@ -141,7 +104,7 @@ export async function runOnce(config) {
       });
 
       results.push({
-        watch: modelLabel,
+        watch: watch.label,
         status: pageState,
         vehicles: vehicles.length,
         added: added.length,
