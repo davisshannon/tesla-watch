@@ -125,19 +125,24 @@ export async function detectPageState(page) {
 export async function navigateToInventory(page, inventoryUrl, opts = {}) {
   const { waitMs = 8000 } = opts;
 
-  await setLocaleCookies(page);
-  log.info(`Navigating to inventory URL: ${inventoryUrl}`);
-  await page.goto(inventoryUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-  await sleep(2000);
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await setLocaleCookies(page);
+    log.info(`Navigating to inventory URL: ${inventoryUrl} (attempt ${attempt})`);
+    await page.goto(inventoryUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await sleep(2000);
 
-  // If locale selector appears despite cookies, navigate directly back
-  await handleLocaleSelector(page, inventoryUrl);
+    await handleLocaleSelector(page, inventoryUrl);
+    await sleep(waitMs);
 
-  await sleep(waitMs);
+    const state = await detectPageState(page);
+    log.info(`Page state after navigation: ${state}`);
+    if (state !== "locale-select") return state;
 
-  const state = await detectPageState(page);
-  log.info(`Page state after navigation: ${state}`);
-  return state;
+    log.warn(`Locale selector still showing on attempt ${attempt} — retrying`);
+    await sleep(2000);
+  }
+
+  return "locale-select";
 }
 
 async function acceptCookies(page) {
