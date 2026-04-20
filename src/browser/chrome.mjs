@@ -78,6 +78,11 @@ export async function getPage(browser) {
 
 export async function detectPageState(page) {
   try {
+    const isLocaleSelector = await page.evaluate(() =>
+      !!document.querySelector(".tds-locale-selector-superregion, .tds-locale-selector")
+    );
+    if (isLocaleSelector) return "locale-select";
+
     const bodyText = await page.evaluate(() => document.body?.innerText || "");
     const url = page.url();
 
@@ -147,12 +152,28 @@ async function confirmLocationModal(page, inventoryUrl) {
     ]);
     await sleep(2000);
 
-    // Confirm navigates to the country selector — navigate directly to target URL
+    // Confirm navigates to the country selector — click Australia to set locale cookie
     const isLocaleSelector = await page.evaluate(() =>
-      !!document.querySelector(".tds-locale-selector-superregion")
+      !!document.querySelector(".tds-locale-selector-superregion, .tds-locale-selector")
     );
     if (isLocaleSelector) {
-      log.info("Country selector shown — navigating directly to inventory URL");
+      log.info("Country selector shown — clicking Australia to set locale");
+      const clicked = await page.evaluate(() => {
+        const links = Array.from(document.querySelectorAll("a[href*='en_AU'], a[href*='/en_AU']"));
+        if (links.length > 0) { links[0].click(); return true; }
+        // fallback: find by text
+        const all = Array.from(document.querySelectorAll("a"));
+        const au = all.find(a => /australia/i.test(a.textContent));
+        if (au) { au.click(); return true; }
+        return false;
+      });
+      if (clicked) {
+        await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+        await sleep(2000);
+        log.info("Australia selected — navigating to inventory URL");
+      } else {
+        log.warn("Could not find Australia link on locale selector — navigating directly");
+      }
       await page.goto(inventoryUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
       await sleep(3000);
     }
