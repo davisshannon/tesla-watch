@@ -23,14 +23,22 @@ async function setLocaleCookies(page) {
 }
 
 export async function warmUpBrowser(page) {
-  log.info("Warming up — setting locale cookies and visiting inventory");
+  log.info("Warming up — establishing AU locale via country selector");
   await setLocaleCookies(page);
+  await page.goto("https://www.tesla.com/en_AU", { waitUntil: "domcontentloaded", timeout: 60000 });
+  await sleep(2000);
+  await acceptCookies(page);
+
+  const localeSelected = await selectAustralia(page);
+  if (localeSelected) {
+    await sleep(2000);
+    await acceptCookies(page);
+  }
+
+  // Navigate to inventory to finalise locale session
   await page.goto("https://www.tesla.com/en_AU/inventory/new/my", { waitUntil: "domcontentloaded", timeout: 60000 });
   await sleep(3000);
   await acceptCookies(page);
-  // If locale selector still appears, dismiss it
-  await handleLocaleSelector(page, "https://www.tesla.com/en_AU/inventory/new/my");
-  await sleep(2000);
   log.info("Warm-up complete — locale established");
 }
 
@@ -145,15 +153,42 @@ async function acceptCookies(page) {
   }
 }
 
-async function handleLocaleSelector(page, inventoryUrl) {
+async function selectAustralia(page) {
   try {
     const isLocaleSelector = await page.evaluate(() =>
       !!document.querySelector(".tds-locale-selector-superregion, .tds-locale-selector")
     );
-    if (!isLocaleSelector) return;
+    if (!isLocaleSelector) return false;
 
-    log.info("Locale selector shown — setting cookies and navigating directly to inventory");
-    await page.setCookie(...AU_LOCALE_COOKIES);
+    log.info("Country selector shown — clicking Australia");
+    // Find the exact link whose href ends with /en_AU (not /en_AU/something)
+    const clicked = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll("a[href]"));
+      const au = links.find(a => /\/en_AU\/?$/.test(a.getAttribute("href")));
+      if (au) { au.click(); return true; }
+      return false;
+    });
+
+    if (clicked) {
+      await page.waitForNavigation({ waitUntil: "domcontentloaded", timeout: 15000 }).catch(() => {});
+      await sleep(1500);
+      log.info(`Australia selected — now at ${page.url()}`);
+      return true;
+    }
+
+    log.warn("Could not find Australia link on country selector");
+    return false;
+  } catch (err) {
+    log.debug(`selectAustralia: ${err.message}`);
+    return false;
+  }
+}
+
+async function handleLocaleSelector(page, inventoryUrl) {
+  try {
+    const selected = await selectAustralia(page);
+    if (!selected) return;
+    // After selecting Australia, navigate to the intended inventory URL
     await page.goto(inventoryUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
     await sleep(3000);
   } catch (err) {
