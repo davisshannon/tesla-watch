@@ -258,6 +258,7 @@
           <div class="checkbox-group" style="margin-top:4px">
             <label class="checkbox-row"><input type="checkbox" id="triggerNewStock"> New stock</label>
             <label class="checkbox-row"><input type="checkbox" id="triggerPriceDrop"> Price drops</label>
+            <label class="checkbox-row"><input type="checkbox" id="notifyOnBlock"> Access blocked alert</label>
           </div>
         </div>
         <div class="save-row">
@@ -924,6 +925,7 @@ async function loadSettings() {
   document.getElementById("imsgTo").value = imsg.to ?? "";
   document.getElementById("triggerNewStock").checked = triggers.includes("new_stock");
   document.getElementById("triggerPriceDrop").checked = triggers.includes("price_drop");
+  document.getElementById("notifyOnBlock").checked = !!(cfg.notify?.notifyOnBlock);
 
   document.querySelectorAll(".model-cb").forEach(cb => {
     cb.checked = !filters.models?.length || filters.models.includes(cb.value);
@@ -1001,6 +1003,7 @@ document.getElementById("saveImsg").addEventListener("click", async () => {
             to: document.getElementById("imsgTo").value.trim(),
           },
           triggers,
+          notifyOnBlock: document.getElementById("notifyOnBlock").checked,
         },
       }),
     });

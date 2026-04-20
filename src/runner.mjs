@@ -55,6 +55,9 @@ export async function runOnce(config) {
 
       if (pageState === "blocked" || pageState === "locale-select" || pageState === "error") {
         log.warn(`${watch.label}: skipping diff — ${pageState}`);
+        if (pageState === "blocked" && config.notify?.notifyOnBlock) {
+          await notifier.send({ title: `Tesla Watch blocked (${watch.label})`, body: "Akamai is denying access. Delete ~/chrome-tesla-automation to reset." });
+        }
         recordRun(db, watchId, { status: pageState, vehicleCount: 0, added: 0, removed: 0, updated: 0 });
         results.push({ watch: watch.label, status: pageState, vehicles: 0, added: 0, removed: 0, updated: 0 });
         continue;

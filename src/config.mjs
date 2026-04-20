@@ -26,6 +26,7 @@ const DEFAULTS = {
       to: "",
     },
     triggers: ["new_stock", "price_drop"],
+    notifyOnBlock: false,
     filters: {
       maxPrice: null,
       states: null,
