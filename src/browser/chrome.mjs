@@ -23,25 +23,20 @@ async function setLocaleCookies(page) {
 }
 
 export async function warmUpBrowser(page) {
-  log.info("Warming up — navigating to tesla.com root to trigger country selector");
-  // Go to root (no locale) to force the country selector to appear
-  await page.goto("https://www.tesla.com", { waitUntil: "domcontentloaded", timeout: 60000 });
+  // Set locale cookies first so Tesla routes us directly to AU inventory.
+  await setLocaleCookies(page);
+
+  // Go straight to AU inventory — cookies mean the country selector usually won't appear.
+  log.info("Warming up — navigating directly to AU inventory");
+  await page.goto("https://www.tesla.com/en_AU/inventory/new/my", { waitUntil: "domcontentloaded", timeout: 60000 });
   await sleep(3000);
   await acceptCookies(page);
 
-  // Select Australia from the country selector
+  // Handle country selector and confirm modal only if they actually appear.
   await selectAustralia(page);
-  await sleep(2000);
-  await acceptCookies(page);
-
-  // Now navigate directly to inventory — locale session is established
-  log.info("Navigating to inventory to finalise locale");
-  await page.goto("https://www.tesla.com/en_AU/inventory/new/my", { waitUntil: "domcontentloaded", timeout: 60000 });
-  await sleep(4000);
-  await acceptCookies(page);
-  // Dismiss confirm modal if present, without clicking Confirm (which redirects to country selector)
   await dismissConfirmModal(page);
   await sleep(2000);
+
   log.info(`Warm-up complete — locale established, at ${page.url()}`);
 }
 
