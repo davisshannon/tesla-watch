@@ -17,6 +17,8 @@ import {
   queryDistinctStates,
   queryDistinctTrims,
   queryStockByState,
+  queryTimeOnLot,
+  queryMultiStintVehicles,
 } from "../db/database.mjs";
 
 const execAsync = promisify(exec);
@@ -43,7 +45,16 @@ async function plistStatus(label) {
     const { stdout } = await execAsync(`launchctl list ${label} 2>/dev/null`);
     const pid = stdout.match(/"PID"\s*=\s*(\d+)/)?.[1];
     const status = stdout.match(/"LastExitStatus"\s*=\s*(\d+)/)?.[1];
-    return { running: !!pid, pid: pid ? Number(pid) : null, lastExitStatus: status ? Number(status) : null };
+    if (pid) return { running: true, pid: Number(pid), lastExitStatus: status ? Number(status) : null };
+  } catch { /* fall through to process check */ }
+
+  // launchctl has no PID (service not loaded or started manually) — fall back
+  // to checking for a running process that matches the label's script pattern.
+  try {
+    const script = label === PLIST_SERVER ? "cli.mjs serve" : "cli.mjs run";
+    const { stdout: ps } = await execAsync(`pgrep -f "${script}" 2>/dev/null || true`);
+    const pid = ps.trim().split("\n").find(Boolean);
+    return { running: !!pid, pid: pid ? Number(pid) : null, lastExitStatus: null };
   } catch {
     return { running: false, pid: null, lastExitStatus: null };
   }
@@ -117,10 +128,9 @@ export async function startServer(config, configPath = "./tesla-watch.config.jso
 
   app.get("/api/scheduler", async (req, res) => {
     try {
-      const [checker, server] = await Promise.all([
-        plistStatus(PLIST_CHECKER),
-        plistStatus(PLIST_SERVER),
-      ]);
+      const checker = await plistStatus(PLIST_CHECKER);
+      // Server is always running if this endpoint is reachable
+      const server = { running: true, pid: process.pid, lastExitStatus: null };
       res.json({ checker, server });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -222,6 +232,16 @@ export async function startServer(config, configPath = "./tesla-watch.config.jso
       const days = Math.min(Number(req.query.days ?? 30), 365);
       res.json(queryStockHistory(db, { watchId, days }));
     } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get("/api/multi-stint", (req, res) => {
+    try { res.json(queryMultiStintVehicles(db)); }
+    catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.get("/api/time-on-lot", (req, res) => {
+    try { res.json(queryTimeOnLot(db, { state: req.query.state || undefined })); }
+    catch (err) { res.status(500).json({ error: err.message }); }
   });
 
   app.get("/api/history/restock", (req, res) => {

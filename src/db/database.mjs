@@ -76,10 +76,77 @@ function applySchema(db) {
       notified    INTEGER NOT NULL DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS appearances (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      vehicle_id    TEXT    NOT NULL,
+      watch_id      INTEGER NOT NULL REFERENCES watches(id),
+      stint         INTEGER NOT NULL DEFAULT 1,
+      first_seen_at TEXT    NOT NULL,
+      removed_at    TEXT,
+      UNIQUE (vehicle_id, watch_id, stint)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_appearances_vehicle ON appearances(vehicle_id, watch_id);
     CREATE INDEX IF NOT EXISTS idx_events_occurred ON events(occurred_at DESC);
     CREATE INDEX IF NOT EXISTS idx_vehicles_watch ON vehicles(watch_id);
     CREATE INDEX IF NOT EXISTS idx_runs_watch ON runs(watch_id, ran_at DESC);
   `);
+
+  migrateAppearances(db);
+}
+
+function migrateAppearances(db) {
+  const count = db.prepare("SELECT COUNT(*) as n FROM appearances").get().n;
+  if (count > 0) return;
+
+  // Pair each 'added' event with the matching 'removed' event (by ordinal per vehicle)
+  db.exec(`
+    INSERT INTO appearances (vehicle_id, watch_id, stint, first_seen_at, removed_at)
+    SELECT
+      add_ev.vehicle_id,
+      add_ev.watch_id,
+      ROW_NUMBER() OVER (
+        PARTITION BY add_ev.vehicle_id, add_ev.watch_id
+        ORDER BY add_ev.occurred_at
+      ) AS stint,
+      add_ev.occurred_at AS first_seen_at,
+      rem_ev.occurred_at AS removed_at
+    FROM (
+      SELECT vehicle_id, watch_id, occurred_at,
+             ROW_NUMBER() OVER (
+               PARTITION BY vehicle_id, watch_id ORDER BY occurred_at
+             ) AS rn
+      FROM events WHERE event_type = 'added'
+    ) AS add_ev
+    LEFT JOIN (
+      SELECT vehicle_id, watch_id, occurred_at,
+             ROW_NUMBER() OVER (
+               PARTITION BY vehicle_id, watch_id ORDER BY occurred_at
+             ) AS rn
+      FROM events WHERE event_type = 'removed'
+    ) AS rem_ev
+      ON  rem_ev.vehicle_id = add_ev.vehicle_id
+      AND rem_ev.watch_id   = add_ev.watch_id
+      AND rem_ev.rn         = add_ev.rn
+  `);
+
+  // Revert any vehicles whose first_seen_at was manually patched later than their first added event
+  db.prepare(`
+    UPDATE vehicles
+    SET first_seen_at = (
+      SELECT MIN(occurred_at) FROM events
+      WHERE event_type = 'added'
+        AND vehicle_id = vehicles.id
+        AND watch_id   = vehicles.watch_id
+    )
+    WHERE EXISTS (
+      SELECT 1 FROM events
+      WHERE event_type = 'added'
+        AND vehicle_id = vehicles.id
+        AND watch_id   = vehicles.watch_id
+        AND occurred_at < vehicles.first_seen_at
+    )
+  `).run();
 }
 
 // ── Watch registry ─────────────────────────────────────────────────────────
@@ -112,6 +179,17 @@ export function getSeenIds(db, watchId) {
 
 export function upsertVehicles(db, watchId, vehicles, vehicleIdFn) {
   const now = new Date().toISOString();
+  const ids = vehicles.map(v => vehicleIdFn(v));
+
+  // Pre-query: which ids already exist, and which are currently removed (reappearances)
+  const placeholders = ids.map(() => "?").join(",");
+  const existingIds = ids.length
+    ? new Set(db.prepare(`SELECT id FROM vehicles WHERE watch_id = ? AND id IN (${placeholders})`).all(watchId, ...ids).map(r => r.id))
+    : new Set();
+  const removedIds = ids.length
+    ? new Set(db.prepare(`SELECT id FROM vehicles WHERE watch_id = ? AND id IN (${placeholders}) AND removed_at IS NOT NULL`).all(watchId, ...ids).map(r => r.id))
+    : new Set();
+
   const stmt = db.prepare(`
     INSERT INTO vehicles
       (id, watch_id, vin, model, trim, year, exterior, interior, wheels,
@@ -128,10 +206,22 @@ export function upsertVehicles(db, watchId, vehicles, vehicleIdFn) {
       raw_json     = excluded.raw_json
   `);
 
+  const openAppearance = db.prepare(`
+    INSERT INTO appearances (vehicle_id, watch_id, stint, first_seen_at, removed_at)
+    VALUES (
+      ?,
+      ?,
+      COALESCE((SELECT MAX(stint) FROM appearances WHERE vehicle_id = ? AND watch_id = ?), 0) + 1,
+      ?,
+      NULL
+    )
+  `);
+
   const upsertMany = db.transaction((vs) => {
     for (const v of vs) {
+      const id = vehicleIdFn(v);
       stmt.run({
-        id: vehicleIdFn(v),
+        id,
         watch_id: watchId,
         vin: v.vin ?? "",
         model: v.model ?? "",
@@ -149,6 +239,9 @@ export function upsertVehicles(db, watchId, vehicles, vehicleIdFn) {
         now,
         raw_json: JSON.stringify(v.raw ?? {}),
       });
+      if (!existingIds.has(id) || removedIds.has(id)) {
+        openAppearance.run(id, watchId, id, watchId, now);
+      }
     }
   });
   upsertMany(vehicles);
@@ -159,11 +252,17 @@ export function upsertVehicles(db, watchId, vehicles, vehicleIdFn) {
 export function markRemoved(db, watchId, removedIds) {
   if (!removedIds.length) return;
   const now = new Date().toISOString();
-  const stmt = db.prepare(
+  const markVehicle = db.prepare(
     "UPDATE vehicles SET removed_at = ? WHERE watch_id = ? AND id = ? AND removed_at IS NULL"
   );
+  const closeAppearance = db.prepare(
+    "UPDATE appearances SET removed_at = ? WHERE watch_id = ? AND vehicle_id = ? AND removed_at IS NULL"
+  );
   const markAll = db.transaction((ids) => {
-    for (const id of ids) stmt.run(now, watchId, id);
+    for (const id of ids) {
+      markVehicle.run(now, watchId, id);
+      closeAppearance.run(now, watchId, id);
+    }
   });
   markAll(removedIds);
 }
@@ -369,6 +468,45 @@ export function queryCurrentStatus(db, { state } = {}) {
 
 export function queryDistinctStates(db) {
   return db.prepare("SELECT DISTINCT location FROM vehicles WHERE location != '' ORDER BY location").all().map(r => r.location);
+}
+
+export function queryMultiStintVehicles(db) {
+  return db.prepare(`
+    SELECT
+      a.vehicle_id,
+      a.watch_id,
+      w.model,
+      v.trim,
+      v.exterior,
+      v.location,
+      v.vin,
+      COUNT(*) AS stint_count,
+      GROUP_CONCAT(a.first_seen_at || '|' || COALESCE(a.removed_at, '') || '|' || a.stint, '~~') AS stints_raw
+    FROM appearances a
+    JOIN watches  w ON w.id = a.watch_id
+    JOIN vehicles v ON v.id = a.vehicle_id AND v.watch_id = a.watch_id
+    GROUP BY a.vehicle_id, a.watch_id
+    HAVING COUNT(*) > 1
+    ORDER BY COUNT(*) DESC, a.vehicle_id
+  `).all();
+}
+
+export function queryTimeOnLot(db, { state } = {}) {
+  const stateFilter = state ? "AND v.location = ?" : "";
+  const params = state ? [state] : [];
+  return db.prepare(`
+    SELECT
+      w.model,
+      w.label,
+      v.location,
+      a.stint,
+      ROUND((julianday(a.removed_at) - julianday(a.first_seen_at)) * 24, 1) AS hours_on_lot
+    FROM appearances a
+    JOIN vehicles v ON v.id = a.vehicle_id AND v.watch_id = a.watch_id
+    JOIN watches  w ON w.id = a.watch_id
+    WHERE a.removed_at IS NOT NULL
+      ${stateFilter}
+  `).all(...params);
 }
 
 export function queryStockByState(db) {

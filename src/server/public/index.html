@@ -146,6 +146,7 @@
 <nav>
   <button class="active" data-tab="overview">Overview</button>
   <button data-tab="vehicles">Vehicles</button>
+  <button data-tab="appearances">Repeat Listings</button>
   <button data-tab="events">Events</button>
   <button data-tab="runs">Run Log</button>
   <button data-tab="settings">Settings</button>
@@ -184,6 +185,19 @@
       </div>
       <canvas id="stockChart"></canvas>
     </div>
+
+    <div class="chart-section">
+      <h2>Time on lot before purchase</h2>
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <select id="timeOnLotStateFilter" style="background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:4px 10px;font-size:0.82rem">
+          <option value="">All states</option>
+        </select>
+      </div>
+      <div id="timeOnLotSummary" style="display:flex;gap:24px;flex-wrap:wrap;margin-bottom:16px"></div>
+      <canvas id="timeOnLotChart"></canvas>
+      <p id="timeOnLotEmpty" style="color:var(--muted);font-size:0.85rem;display:none">No sold vehicles for this filter yet.</p>
+    </div>
+
   </div>
 
   <!-- VEHICLES -->
@@ -214,6 +228,40 @@
       <span id="vPageInfo" style="font-size:0.82rem;color:var(--muted);line-height:2"></span>
       <button id="vNext">Next →</button>
     </div>
+  </div>
+
+  <!-- APPEARANCES -->
+  <div class="tab-pane" id="tab-appearances">
+    <div class="table-controls">
+      <select id="apModelFilter"><option value="">All models</option></select>
+      <select id="apTrimFilter"><option value="">All variants</option></select>
+      <select id="apStateFilter"><option value="">All states</option></select>
+    </div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th>VIN</th><th>Model</th><th>Trim</th><th>Colour</th><th>State</th><th style="text-align:center">Stints</th>
+        </tr></thead>
+        <tbody id="apTbody"></tbody>
+      </table>
+    </div>
+    <!-- Stint detail panel -->
+    <div id="apDetail" style="display:none;margin-top:20px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <span id="apDetailTitle" style="font-weight:600;font-size:0.9rem"></span>
+        <button id="apDetailClose" style="background:none;border:none;color:var(--muted);font-size:1.1rem;cursor:pointer">✕</button>
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="font-size:0.78rem;color:#555;text-transform:uppercase;letter-spacing:0.04em">
+          <th style="padding:6px 12px;text-align:left;font-weight:500">Stint</th>
+          <th style="padding:6px 12px;text-align:left;font-weight:500">First seen</th>
+          <th style="padding:6px 12px;text-align:left;font-weight:500">Removed</th>
+          <th style="padding:6px 12px;text-align:left;font-weight:500">Duration</th>
+        </tr></thead>
+        <tbody id="apDetailTbody"></tbody>
+      </table>
+    </div>
+    <p id="apEmpty" style="color:var(--muted);font-size:0.85rem;display:none">No vehicles have appeared more than once yet.</p>
   </div>
 
   <!-- EVENTS -->
@@ -394,7 +442,7 @@ document.querySelectorAll("nav button").forEach(btn => {
     document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById(`tab-${btn.dataset.tab}`).classList.add("active");
-    const loaders = { overview: loadOverview, vehicles: () => { loadTrims(); loadVehicles(); }, events: loadEvents, runs: loadRuns, settings: loadSettings };
+    const loaders = { overview: loadOverview, vehicles: () => { loadTrims(); loadVehicles(); }, appearances: loadAppearances, events: loadEvents, runs: loadRuns, settings: loadSettings };
     loaders[btn.dataset.tab]?.();
   });
 });
@@ -516,7 +564,7 @@ async function loadOverview() {
     </div>`;
   }).join("");
   document.getElementById("lastUpdated").textContent = "Updated " + fmt(new Date().toISOString());
-  await Promise.all([loadStockChart(wList), loadMap()]);
+  await Promise.all([loadStockChart(wList), loadMap(), loadTimeOnLot()]);
 }
 
 document.getElementById("overviewStateFilter").addEventListener("change", e => {
@@ -670,14 +718,19 @@ async function loadMap() {
     label.textContent = state;
     svg.appendChild(label);
 
-    // Bubbles per model
+    // Collect bubble data for this state
     const hasBubbles = modelList.some(m => (counts[m] || 0) > 0);
-    for (const model of modelList) {
+    const bubbles = modelList.flatMap(model => {
       const count = counts[model] || 0;
-      if (count === 0) continue;
+      if (count === 0) return [];
       const r = 18 + (count / maxCount) * 55;
       const bx = hasBubbles && modelList.filter(m => counts[m] > 0).length > 1
         ? cx + offsets[model] : cx;
+      return [{ model, count, r, bx, cy }];
+    });
+
+    // Render circles largest-first so smaller bubbles sit on top when overlapping
+    for (const { model, count, r, bx } of [...bubbles].sort((a, b) => b.r - a.r)) {
       const circle = document.createElementNS(ns, "circle");
       circle.setAttribute("cx", bx);
       circle.setAttribute("cy", cy);
@@ -694,7 +747,10 @@ async function loadMap() {
       circle.addEventListener("click", () => navigateToVehicles(state, model));
 
       svg.appendChild(circle);
+    }
 
+    // Render all labels after all circles so numbers are never obscured
+    for (const { count, bx } of bubbles) {
       const t = document.createElementNS(ns, "text");
       t.setAttribute("x", bx);
       t.setAttribute("y", cy + 14);
@@ -738,7 +794,9 @@ async function loadStockChart(wList) {
   if (activeChartWatchIds.size === 0) wList.forEach(w => activeChartWatchIds.add(w.id));
   wList.forEach(w => {
     const chip = document.createElement("button");
+    const chipColor = MODEL_COLORS[w.model] || "var(--tesla)";
     chip.className = "chip" + (activeChartWatchIds.has(w.id) ? " active" : "");
+    if (activeChartWatchIds.has(w.id)) chip.style.cssText = `background:${chipColor};border-color:${chipColor};color:#fff`;
     chip.textContent = w.label;
     chip.onclick = () => { if (activeChartWatchIds.has(w.id)) activeChartWatchIds.delete(w.id); else activeChartWatchIds.add(w.id); loadStockChart(wList); };
     controls.appendChild(chip);
@@ -746,7 +804,9 @@ async function loadStockChart(wList) {
   const COLORS = ["#e82127","#3b82f6","#2db85e","#f59e0b","#a855f7","#ec4899"];
   // Build unique sorted dates for X axis labels
   const allDates = [...new Set(rows.map(r => r.date))].sort();
-  const datasets = wList.filter(w => activeChartWatchIds.has(w.id)).map((w, i) => ({
+  const datasets = wList.filter(w => activeChartWatchIds.has(w.id)).map((w, i) => {
+    const color = MODEL_COLORS[w.model] || COLORS[i % COLORS.length];
+    return {
     label: w.label,
     data: rows.filter(r => r.watch_id === w.id).map(r => ({
       x: r.date,
@@ -754,12 +814,12 @@ async function loadStockChart(wList) {
       added: r.added,
       time_of_day: r.time_of_day,
     })),
-    backgroundColor: COLORS[i % COLORS.length] + "cc",
-    borderColor: COLORS[i % COLORS.length],
+    backgroundColor: color + "cc",
+    borderColor: color,
     borderWidth: 1,
     pointRadius: ctx => Math.max(4, Math.min(18, (ctx.raw?.added ?? 1) * 3)),
     pointHoverRadius: ctx => Math.max(6, Math.min(22, (ctx.raw?.added ?? 1) * 3 + 2)),
-  }));
+  }; });
   if (stockChart) stockChart.destroy();
   stockChart = new Chart(document.getElementById("stockChart"), {
     type: "scatter",
@@ -804,6 +864,214 @@ async function loadStockChart(wList) {
     },
   });
 }
+
+// ── Time on lot ───────────────────────────────────────────────────────────────
+let timeOnLotChart = null;
+
+async function loadTimeOnLot() {
+  const state = document.getElementById("timeOnLotStateFilter").value;
+  const params = state ? `?state=${state}` : "";
+  const rows = await apiFetch("/api/time-on-lot" + params);
+  const empty = document.getElementById("timeOnLotEmpty");
+  const summaryEl = document.getElementById("timeOnLotSummary");
+
+  // Populate state dropdown once
+  const sel = document.getElementById("timeOnLotStateFilter");
+  if (sel.options.length === 1 && allStates.length) {
+    allStates.forEach(s => { const o = document.createElement("option"); o.value = s; o.textContent = s; sel.appendChild(o); });
+    sel.value = state;
+  }
+
+  if (!rows.length) {
+    empty.style.display = "block";
+    summaryEl.innerHTML = "";
+    if (timeOnLotChart) { timeOnLotChart.destroy(); timeOnLotChart = null; }
+    return;
+  }
+  empty.style.display = "none";
+
+  const COLORS = { my: "#e82127", m3: "#3b82f6" };
+  const LABELS = { my: "Model Y", m3: "Model 3" };
+  const BUCKETS = ["< 30m", "30m–1h", "1–1.5h", "1.5–2h", "2–6h", "6–12h", "12–24h", "1–4 days", "4+ days"];
+
+  function bucket(h) {
+    if (h < 0.5)  return 0;
+    if (h < 1)    return 1;
+    if (h < 1.5)  return 2;
+    if (h < 2)    return 3;
+    if (h < 6)    return 4;
+    if (h < 12)   return 5;
+    if (h < 24)   return 6;
+    if (h < 96)   return 7;
+    return 8;
+  }
+  function median(arr) {
+    if (!arr.length) return null;
+    const s = [...arr].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+  function fmtHours(h) {
+    if (h === null) return "—";
+    if (h < 24) return `${Math.round(h)}h`;
+    return `${(h / 24).toFixed(1)}d`;
+  }
+
+  const byModel = {};
+  for (const r of rows) {
+    (byModel[r.model] = byModel[r.model] || []).push(r.hours_on_lot);
+  }
+
+  summaryEl.innerHTML = Object.entries(byModel).map(([model, hours]) => {
+    const med = median(hours);
+    const color = COLORS[model] || "#888";
+    return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 18px;min-width:140px">
+      <div style="font-size:0.75rem;color:var(--muted);margin-bottom:4px">${LABELS[model] || model}</div>
+      <div style="font-size:1.6rem;font-weight:700;color:${color}">${fmtHours(med)}</div>
+      <div style="font-size:0.75rem;color:var(--muted)">median · ${hours.length} sold</div>
+    </div>`;
+  }).join("");
+
+  const models = Object.keys(byModel);
+  const datasets = models.map(model => {
+    const counts = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    for (const h of byModel[model]) counts[bucket(h)]++;
+    return {
+      label: LABELS[model] || model,
+      data: counts,
+      backgroundColor: (COLORS[model] || "#888") + "cc",
+      borderColor: COLORS[model] || "#888",
+      borderWidth: 1,
+      borderRadius: 4,
+    };
+  });
+
+  if (timeOnLotChart) timeOnLotChart.destroy();
+  timeOnLotChart = new Chart(document.getElementById("timeOnLotChart"), {
+    type: "bar",
+    data: { labels: BUCKETS, datasets },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: "#aaa", boxWidth: 14 } },
+        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y} vehicle${ctx.parsed.y !== 1 ? "s" : ""}` } },
+      },
+      scales: {
+        x: { ticks: { color: "#888" }, grid: { color: "#1e1e1e" } },
+        y: { beginAtZero: true, ticks: { color: "#888", precision: 0 }, grid: { color: "#1e1e1e" } },
+      },
+    },
+  });
+}
+
+document.getElementById("timeOnLotStateFilter").addEventListener("change", loadTimeOnLot);
+
+// ── Appearances tab ───────────────────────────────────────────────────────────
+let _apRows = [];
+
+function fmtApDate(iso) {
+  if (!iso) return `<em style="color:var(--muted)">still active</em>`;
+  return new Date(iso).toLocaleString("en-AU", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function fmtApDuration(first, removed) {
+  if (!removed) return `<em style="color:var(--muted)">ongoing</em>`;
+  const h = (new Date(removed) - new Date(first)) / 3600000;
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 24) return `${h.toFixed(1)}h`;
+  return `${(h / 24).toFixed(1)}d`;
+}
+
+async function loadAppearances() {
+  const LABELS = { my: "Model Y", m3: "Model 3" };
+  _apRows = await apiFetch("/api/multi-stint");
+
+  // Populate filter dropdowns
+  const models = [...new Set(_apRows.map(r => r.model))].sort();
+  const trims  = [...new Set(_apRows.map(r => r.trim).filter(Boolean))].sort();
+  const states = [...new Set(_apRows.map(r => r.location).filter(Boolean))].sort();
+
+  function populateSel(id, values, labelFn) {
+    const sel = document.getElementById(id);
+    const prev = sel.value;
+    sel.innerHTML = `<option value="">${sel.options[0].text}</option>`;
+    values.forEach(v => { const o = document.createElement("option"); o.value = v; o.textContent = labelFn ? labelFn(v) : v; if (v === prev) o.selected = true; sel.appendChild(o); });
+  }
+  populateSel("apModelFilter", models, m => LABELS[m] || m);
+  populateSel("apTrimFilter", trims);
+  populateSel("apStateFilter", states);
+
+  renderAppearances();
+}
+
+function renderAppearances() {
+  const LABELS = { my: "Model Y", m3: "Model 3" };
+  const MODEL_COLORS = { my: "#e82127", m3: "#3b82f6" };
+  const model = document.getElementById("apModelFilter").value;
+  const trim  = document.getElementById("apTrimFilter").value;
+  const state = document.getElementById("apStateFilter").value;
+
+  const filtered = _apRows.filter(r =>
+    (!model || r.model === model) &&
+    (!trim  || r.trim === trim) &&
+    (!state || r.location === state)
+  );
+
+  const tbody = document.getElementById("apTbody");
+  const empty = document.getElementById("apEmpty");
+
+  if (!filtered.length) {
+    tbody.innerHTML = "";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+
+  tbody.innerHTML = filtered.map(row => {
+    const color = MODEL_COLORS[row.model] || "#888";
+    return `<tr style="cursor:pointer" onclick='showApDetail(${JSON.stringify(row.vehicle_id)}, ${JSON.stringify(row.watch_id)})'>
+      <td>${row.vin || row.vehicle_id}</td>
+      <td><span style="color:${color}">${LABELS[row.model] || row.model}</span></td>
+      <td>${row.trim || "—"}</td>
+      <td>${row.exterior || "—"}</td>
+      <td>${row.location || "—"}</td>
+      <td style="text-align:center"><span style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:2px 10px;font-size:0.82rem">${row.stint_count}</span></td>
+    </tr>`;
+  }).join("");
+
+  // Hide detail panel when filters change
+  document.getElementById("apDetail").style.display = "none";
+}
+
+function showApDetail(vehicleId, watchId) {
+  const LABELS = { my: "Model Y", m3: "Model 3" };
+  const row = _apRows.find(r => r.vehicle_id === vehicleId && r.watch_id === watchId);
+  if (!row) return;
+
+  const stints = row.stints_raw.split("~~").map(s => {
+    const parts = s.split("|");
+    return { stint: Number(parts[2]), first_seen_at: parts[0], removed_at: parts[1] || null };
+  }).sort((a, b) => a.stint - b.stint);
+
+  document.getElementById("apDetailTitle").textContent = `${row.vin || row.vehicle_id} — ${LABELS[row.model] || row.model} ${row.trim || ""} ${row.exterior || ""}`.trim();
+  document.getElementById("apDetailTbody").innerHTML = stints.map(s => `
+    <tr style="font-size:0.85rem;border-top:1px solid var(--border)">
+      <td style="padding:8px 12px;color:var(--muted)">Stint ${s.stint}</td>
+      <td style="padding:8px 12px">${fmtApDate(s.first_seen_at)}</td>
+      <td style="padding:8px 12px">${fmtApDate(s.removed_at)}</td>
+      <td style="padding:8px 12px">${fmtApDuration(s.first_seen_at, s.removed_at)}</td>
+    </tr>`).join("");
+
+  const detail = document.getElementById("apDetail");
+  detail.style.display = "block";
+  detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+document.getElementById("apDetailClose").addEventListener("click", () => {
+  document.getElementById("apDetail").style.display = "none";
+});
+["apModelFilter", "apTrimFilter", "apStateFilter"].forEach(id =>
+  document.getElementById(id).addEventListener("change", renderAppearances)
+);
 
 // ── Vehicles ─────────────────────────────────────────────────────────────────
 let vehicleFilters = { search: "", watchId: "", trim: "", stateFilter: "", status: "" };
