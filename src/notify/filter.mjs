@@ -21,7 +21,8 @@ export function applyFilters(vehicles, filterConfig = {}, fbtThreshold = null) {
  * Apply filters to a list of { vehicle, priorPrice } updated pairs.
  */
 export function applyFiltersToUpdated(updatedPairs, filterConfig = {}, fbtThreshold = null) {
-  return updatedPairs.filter(({ vehicle }) =>
-    applyFilters([vehicle], filterConfig, fbtThreshold).length > 0
-  );
+  return updatedPairs.filter(({ vehicle, priorPrice }) => {
+    if (Number(vehicle.price) >= Number(priorPrice)) return false;
+    return applyFilters([vehicle], filterConfig, fbtThreshold).length > 0;
+  });
 }
