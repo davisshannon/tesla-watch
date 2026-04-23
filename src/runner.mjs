@@ -45,6 +45,7 @@ export async function runOnce(config) {
           inventoryUrl: watch.inventoryUrl,
           localeBaseUrl: watch.localeBaseUrl,
           waitMs: config.waitMs,
+          region: watch.region,
         });
         vehicles = result.vehicles;
         pageState = result.pageState;

@@ -6,7 +6,7 @@ const API_BASE = "https://www.tesla.com/inventory/api/v4/inventory-results";
 const PAGE_SIZE = 24;
 
 export async function collectInventory(page, config) {
-  const { inventoryUrl } = config;
+  const { inventoryUrl, region } = config;
 
   const parsed = new URL(inventoryUrl);
   const model = parsed.pathname.split("/").pop();
@@ -21,10 +21,10 @@ export async function collectInventory(page, config) {
     log.info(`Page now at ${page.url()}`);
   }
 
-  log.info(`Fetching inventory for ${model} via API`);
+  log.info(`Fetching inventory for ${model}${region ? ` (region: ${region})` : ""} via API`);
 
   try {
-    const { vehicles, total } = await fetchAllPages(page, model);
+    const { vehicles, total } = await fetchAllPages(page, model, region);
     log.info(`${model}: ${vehicles.length} of ${total} vehicles fetched`);
     return { vehicles, pageState: vehicles.length > 0 ? "inventory" : "no-stock" };
   } catch (err) {
@@ -34,7 +34,7 @@ export async function collectInventory(page, config) {
   }
 }
 
-async function fetchAllPages(page, model) {
+async function fetchAllPages(page, model, region) {
   const allVehicles = [];
   let offset = 0;
   let total = null;
@@ -52,6 +52,7 @@ async function fetchAllPages(page, model) {
         market: "AU",
         language: "en",
         super_region: "north america",
+        ...(region && { region }),
       },
       offset,
       count: PAGE_SIZE,
