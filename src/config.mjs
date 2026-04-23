@@ -3,12 +3,10 @@ import path from "path";
 
 export const AU_STATES = ["VIC", "NSW", "QLD", "WA", "SA", "TAS", "ACT", "NT"];
 
-function buildDefaultWatches() {
-  return [
-    { model: "my", label: "Model Y (All AU)", market: "en_AU" },
-    { model: "m3", label: "Model 3 (All AU)", market: "en_AU" },
-  ];
-}
+const WATCH_MODELS = [
+  { model: "my", label: "Model Y" },
+  { model: "m3", label: "Model 3" },
+];
 
 const DEFAULTS = {
   chromeDebugUrl: "http://localhost:9222",
@@ -17,6 +15,7 @@ const DEFAULTS = {
   waitMs: 8000,
   fbtThreshold: 91387,
   sort: "plh",
+  watchRegion: null,
   server: {
     port: 3737,
   },
@@ -35,7 +34,6 @@ const DEFAULTS = {
       fbtOnly: false,
     },
   },
-  watches: buildDefaultWatches(),
 };
 
 export async function loadConfig(configPath = "./tesla-watch.config.json") {
@@ -51,10 +49,15 @@ export async function loadConfig(configPath = "./tesla-watch.config.json") {
 
   const merged = deepMerge(DEFAULTS, fileConfig);
 
-  merged.watches = merged.watches.map((w) => ({
-    ...w,
-    inventoryUrl: buildInventoryUrl(w, merged.sort),
-    localeBaseUrl: w.market === "en_AU" ? "https://www.tesla.com/en_AU" : null,
+  // Always derive watches from watchRegion — never read watches from the config file
+  const region = merged.watchRegion || null;
+  merged.watches = WATCH_MODELS.map(({ model, label }) => ({
+    model,
+    market: "en_AU",
+    label: region ? `${label} (${region})` : `${label} (All AU)`,
+    ...(region && { region }),
+    inventoryUrl: buildInventoryUrl({ model, market: "en_AU" }, merged.sort),
+    localeBaseUrl: "https://www.tesla.com/en_AU",
   }));
 
   return merged;

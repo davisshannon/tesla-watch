@@ -416,6 +416,21 @@
             <option value="n">Newest first</option>
           </select>
         </div>
+        <div class="field">
+          <label>Watch region</label>
+          <select id="watchRegion" style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:8px 12px;font-size:0.9rem">
+            <option value="">All Australia</option>
+            <option value="VIC">VIC</option>
+            <option value="NSW">NSW</option>
+            <option value="QLD">QLD</option>
+            <option value="WA">WA</option>
+            <option value="SA">SA</option>
+            <option value="TAS">TAS</option>
+            <option value="ACT">ACT</option>
+            <option value="NT">NT</option>
+          </select>
+          <div class="hint">Filters inventory to vehicles deliverable in this state. "All Australia" queries the full national listing.</div>
+        </div>
         <div class="save-row">
           <button class="btn btn-primary" id="saveAdvanced">Save</button>
           <span class="save-msg" id="saveAdvancedMsg"></span>
@@ -1238,6 +1253,7 @@ async function loadSettings() {
   document.getElementById("waitMs").value = cfg.waitMs ?? 8000;
   document.getElementById("fbtThreshold").value = cfg.fbtThreshold ?? 91387;
   document.getElementById("sortOrder").value = cfg.sort ?? "plh";
+  document.getElementById("watchRegion").value = cfg.watchRegion ?? "";
 
   await loadSchedulerStatus();
 
@@ -1345,6 +1361,7 @@ document.getElementById("saveAdvanced").addEventListener("click", async () => {
         waitMs: Number(document.getElementById("waitMs").value),
         fbtThreshold: Number(document.getElementById("fbtThreshold").value),
         sort: document.getElementById("sortOrder").value,
+        watchRegion: document.getElementById("watchRegion").value || null,
       }),
     });
     showMsg("saveAdvancedMsg", "Saved", false);
