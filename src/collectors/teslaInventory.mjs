@@ -12,10 +12,19 @@ export async function collectInventory(page, config) {
   const model = parsed.pathname.split("/").pop();
   const cleanUrl = `${parsed.origin}${parsed.pathname}`;
 
+  // Navigate to this model's inventory page if not already there.
+  // Ensures session cookies/tokens are scoped to the right model before fetching.
+  if (!page.url().includes(`/inventory/new/${model}`)) {
+    log.info(`Navigating to ${model} inventory page`);
+    await page.goto(cleanUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
+    await sleep(3000);
+    log.info(`Page now at ${page.url()}`);
+  }
+
   log.info(`Fetching inventory for ${model} via API`);
 
   try {
-    const { vehicles, total } = await fetchAllPages(page, model, cleanUrl);
+    const { vehicles, total } = await fetchAllPages(page, model);
     log.info(`${model}: ${vehicles.length} of ${total} vehicles fetched`);
     return { vehicles, pageState: vehicles.length > 0 ? "inventory" : "no-stock" };
   } catch (err) {
@@ -25,7 +34,7 @@ export async function collectInventory(page, config) {
   }
 }
 
-async function fetchAllPages(page, model, inventoryPageUrl) {
+async function fetchAllPages(page, model) {
   const allVehicles = [];
   let offset = 0;
   let total = null;
@@ -52,11 +61,13 @@ async function fetchAllPages(page, model, inventoryPageUrl) {
       version: "v2",
     };
 
-    const apiUrl = `${API_BASE}?query=${encodeURIComponent(JSON.stringify(query))}`;
+    const url = `${API_BASE}?query=${encodeURIComponent(JSON.stringify(query))}`;
 
-    // Intercept the API response fired by the page's own SPA (carries correct
-    // auth headers) rather than issuing a manual fetch that can 403.
-    const json = await interceptOrFetch(page, model, inventoryPageUrl, apiUrl, offset);
+    const json = await page.evaluate(async (u) => {
+      const res = await fetch(u, { credentials: "include" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    }, url);
 
     if (total === null) {
       total = json?.total_matches_found ?? 0;
@@ -72,47 +83,4 @@ async function fetchAllPages(page, model, inventoryPageUrl) {
   } while (allVehicles.length < total);
 
   return { vehicles: allVehicles, total: total ?? 0 };
-}
-
-// For offset 0: navigate to the inventory page and capture the API call the
-// SPA fires automatically (same headers/tokens Tesla's own code uses).
-// For subsequent offsets: manual fetch is fine — session is warm by then.
-async function interceptOrFetch(page, model, inventoryPageUrl, apiUrl, offset) {
-  if (offset > 0) {
-    return page.evaluate(async (u) => {
-      const res = await fetch(u, { credentials: "include" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    }, apiUrl);
-  }
-
-  // Set up response interception before navigating
-  let resolveCapture, rejectCapture;
-  const captured = new Promise((res, rej) => { resolveCapture = res; rejectCapture = rej; });
-
-  // URL-encoded form of "model":"m3" / "model":"my" in the query param
-  const modelToken = encodeURIComponent(`"model":"${model}"`);
-
-  const handler = async (response) => {
-    if (response.url().startsWith(API_BASE) && response.url().includes(modelToken)) {
-      try {
-        resolveCapture(await response.json());
-      } catch (e) {
-        rejectCapture(e);
-      }
-    }
-  };
-  page.on("response", handler);
-
-  const timeout = setTimeout(() => rejectCapture(new Error("intercept timeout")), 15000);
-
-  try {
-    log.info(`Navigating to ${model} inventory page to capture SPA API call`);
-    await page.goto(inventoryPageUrl, { waitUntil: "domcontentloaded", timeout: 30000 }).catch(() => {});
-    const json = await captured;
-    return json;
-  } finally {
-    clearTimeout(timeout);
-    page.off("response", handler);
-  }
 }
