@@ -153,9 +153,14 @@ function migrateAppearances(db) {
 
 export function upsertWatch(db, { model, category, label, market }) {
   const existing = db
-    .prepare("SELECT id FROM watches WHERE model = ? AND category = ? AND market = ?")
+    .prepare("SELECT id, label FROM watches WHERE model = ? AND category = ? AND market = ?")
     .get(model, category ?? "", market ?? "en_AU");
-  if (existing) return existing.id;
+  if (existing) {
+    if (existing.label !== label) {
+      db.prepare("UPDATE watches SET label = ? WHERE id = ?").run(label, existing.id);
+    }
+    return existing.id;
+  }
   const info = db
     .prepare("INSERT INTO watches (model, category, label, market) VALUES (?, ?, ?, ?)")
     .run(model, category ?? "", label, market ?? "en_AU");
@@ -201,6 +206,8 @@ export function upsertVehicles(db, watchId, vehicles, vehicleIdFn) {
       price        = excluded.price,
       subtotal     = excluded.subtotal,
       odometer     = excluded.odometer,
+      location     = excluded.location,
+      city         = excluded.city,
       last_seen_at = excluded.last_seen_at,
       removed_at   = NULL,
       raw_json     = excluded.raw_json
